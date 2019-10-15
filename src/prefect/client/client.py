@@ -270,7 +270,7 @@ class Client:
         retries = Retry(
             total=6,
             backoff_factor=1,
-            status_forcelist=[500, 502, 503, 504],
+            status_forcelist=[500, 503, 504],
             method_whitelist=["DELETE", "GET", "POST"],
         )
         session.mount("https://", HTTPAdapter(max_retries=retries))
