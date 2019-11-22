@@ -136,7 +136,6 @@ class DaskExecutor(Executor):
         else:
             raise ValueError("This executor has not been started.")
 
-        fire_and_forget(future)
         return future
 
     def map(self, fn: Callable, *args: Any, **kwargs: Any) -> List[Future]:
@@ -168,7 +167,6 @@ class DaskExecutor(Executor):
         else:
             raise ValueError("This executor has not been started.")
 
-        fire_and_forget(futures)
         return futures
 
     def wait(self, futures: Any) -> Any:
