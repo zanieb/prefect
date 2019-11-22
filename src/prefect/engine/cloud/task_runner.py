@@ -66,7 +66,7 @@ class CloudTaskRunner(TaskRunner):
             self.client.update_task_run_heartbeat(task_run_id)  # type: ignore
 
             # use empty string for testing purposes
-            flow_run_id = prefect.context.get("flow_run_id", "")  # type: str
+            flow_run_id = self.flow_run_id  # type: str
             query = 'query{flow_run_by_pk(id: "' + flow_run_id + '"){state}}'
             state = self.client.graphql(query).data.flow_run_by_pk.state
             if state == "Cancelled":
@@ -174,6 +174,7 @@ class CloudTaskRunner(TaskRunner):
 
         # we assign this so it can be shared with heartbeat thread
         self.task_run_id = context.get("task_run_id")  # type: ignore
+        self.flow_run_id = context.get("flow_run_id")  # type: ignore
         context.update(checkpointing=True)
 
         return super().initialize_run(state=state, context=context)
