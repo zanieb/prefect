@@ -70,6 +70,7 @@ class DaskKubernetesEnvironment(Environment):
         work_stealing: bool = False,
         private_registry: bool = False,
         docker_secret: str = None,
+        service_account_name: str = None,
         labels: List[str] = None,
         on_start: Callable = None,
         on_exit: Callable = None,
@@ -84,6 +85,7 @@ class DaskKubernetesEnvironment(Environment):
             self.docker_secret = docker_secret or "DOCKER_REGISTRY_CREDENTIALS"
         else:
             self.docker_secret = None  # type: ignore
+        self.service_account_name = None
         self.scheduler_spec_file = scheduler_spec_file
         self.worker_spec_file = worker_spec_file
 
@@ -334,6 +336,11 @@ class DaskKubernetesEnvironment(Environment):
         yaml_obj["spec"]["template"]["metadata"]["labels"][
             "identifier"
         ] = self.identifier_label
+
+        if self.service_account_name:
+            yaml_obj["spec"]["template"]["spec"][
+                "serviceAccountName"
+            ] = self.service_account_name
 
         # set environment variables
         env = yaml_obj["spec"]["template"]["spec"]["containers"][0]["env"]
