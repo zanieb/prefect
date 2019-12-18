@@ -34,28 +34,38 @@ class CloudHandler(logging.StreamHandler):
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
         self.logger.setLevel(context.config.logging.level)
+        self.logger.info("CloudHandler init")
 
     @property
     def queue(self) -> Queue:
+        self.logger.info("Queue start")
         if not hasattr(self, "_queue"):
+            self.logger.info("Queue hasattr")
             self._queue = Queue()  # type: Queue
             self._flush = False
             self.start()
+        self.logger.info("Queue end")
         return self._queue
 
     def flush(self) -> None:
+        self.logger.info("Flush start")
         self._flush = True
         if self.client is not None:
             self.batch_upload()
             self._thread.join()
+        self.logger.info("Flush end")
 
     def batch_upload(self) -> None:
+        self.logger.info("Batch upload start")
         logs = []
         try:
             while True:
+                self.logger.info("Batch dequeue")
                 log = self.queue.get(False)
+                self.logger.info("Batch dequeued {}".format(log))
                 logs.append(log)
         except Empty:
+            self.logger.info("Batch empty")
             pass
 
         if logs:
@@ -66,11 +76,15 @@ class CloudHandler(logging.StreamHandler):
                 self.logger.critical(
                     "Failed to write log with error: {}".format(str(exc))
                 )
+        self.logger.info("Batch end")
 
     def _monitor(self) -> None:
+        self.logger.info("Monitor start")
         while not self._flush:
+            self.logger.info("Monitor iteration...")
             self.batch_upload()
             time.sleep(self.heartbeat)
+        self.logger.info("Monitor end")
 
     def __del__(self) -> None:
         if hasattr(self, "_thread"):
@@ -78,7 +92,9 @@ class CloudHandler(logging.StreamHandler):
             atexit.unregister(self.flush)
 
     def start(self) -> None:
+        self.logger.info("Starting start()")
         if not hasattr(self, "_thread"):
+            self.logger.info("Start hasattr")
             self.heartbeat = context.config.cloud.logging_heartbeat
             self._thread = t = threading.Thread(
                 target=self._monitor, name="PrefectCloudLoggingThread"
@@ -86,17 +102,22 @@ class CloudHandler(logging.StreamHandler):
             t.daemon = True
             t.start()
             atexit.register(self.flush)
+            self.logger.info("Start hasattr end")
 
     def put(self, log: dict) -> None:
         try:
+            self.logger.info("put pre dump")
             json.dumps(log)  # make sure the payload is serializable
             self.queue.put(log)
+            self.logger.info("put enqueued")
         except TypeError as exc:
             self.logger.critical("Failed to write log with error: {}".format(str(exc)))
 
     def emit(self, record) -> None:  # type: ignore
         # if we shouldn't log to cloud, don't emit
+        self.logger.info("Emit start")
         if not prefect.context.config.logging.log_to_cloud:
+            self.logger.info("Emit not log_to_cloud :(")
             return
 
         try:
@@ -124,6 +145,7 @@ class CloudHandler(logging.StreamHandler):
 
             log["info"] = record_dict
             self.put(log)
+            self.logger.info("Emit put {}".format(log))
         except Exception as exc:
             self.logger.critical("Failed to write log with error: {}".format(str(exc)))
 
