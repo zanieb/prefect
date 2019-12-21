@@ -63,31 +63,10 @@ class CloudFlowRunner(FlowRunner):
             flow=flow, task_runner_cls=CloudTaskRunner, state_handlers=state_handlers
         )
 
-    def _heartbeat(self) -> bool:
-        try:
-            # use empty string for testing purposes
-            flow_run_id = prefect.context.get("flow_run_id", "")  # type: str
-            self.client.update_flow_run_heartbeat(flow_run_id)
-            query = {
-                "query": {
-                    with_args("flow_run_by_pk", {"id": flow_run_id}): {
-                        "state": True,
-                        "flow": {"settings": True},
-                    }
-                }
-            }
-            flow_run = self.client.graphql(query).data.flow_run_by_pk
-            if flow_run.state == "Cancelled":
-                _thread.interrupt_main()
-                return False
-            if flow_run.flow.settings.get("disable_heartbeat"):
-                return False
-            return True
-        except Exception as exc:
-            self.logger.exception(
-                "Heartbeat failed for Flow '{}'".format(self.flow.name)
-            )
-            return False
+    def _heartbeat(self):
+        # use empty string for testing purposes
+        flow_run_id = prefect.context.get("flow_run_id", "")  # type: str
+        self.client.update_flow_run_heartbeat(flow_run_id)
 
     def call_runner_target_handlers(self, old_state: State, new_state: State) -> State:
         """
