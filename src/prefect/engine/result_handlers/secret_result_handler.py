@@ -18,20 +18,21 @@ class SecretResultHandler(ResultHandler):
         self.secret_task = secret_task
         super().__init__()
 
-    def read(self, name: str) -> Any:
+    def read(self, key: str) -> Any:
         """
         Read a secret from a provided name with the provided Secret class;
         this method actually retrieves the secret from the Secret store.
 
         Args:
-            - name (str): the name of the secret to retrieve
+            - key (str): the name of the secret to retrieve
 
         Returns:
             - Any: the deserialized result
         """
         return self.secret_task.run()  # type: ignore
 
-    def write(self, result: Any) -> str:
+    # TODO: I'm confused, this never writes anything... right?
+    def write(self, result: Any, key: str = None) -> str:
         """
         Returns the name of the secret.
 

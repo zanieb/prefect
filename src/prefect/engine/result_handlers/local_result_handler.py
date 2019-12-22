@@ -3,13 +3,14 @@ Result Handlers provide the hooks that Prefect uses to store task results in pro
 
 Anytime a task needs its output or inputs stored, a result handler is used to determine where this data should be stored (and how it can be retrieved).
 """
-import base64
+import os
 import tempfile
 from typing import Any
 
 import cloudpickle
 
 from prefect.engine.result_handlers import ResultHandler
+from prefect.utilities.exceptions import PrefectError
 
 
 class LocalResultHandler(ResultHandler):
@@ -21,31 +22,44 @@ class LocalResultHandler(ResultHandler):
     **NOTE**: Stored results will _not_ be automatically cleaned up after execution.
 
     Args:
-        - dir (str, optional): the _absolute_ path to a directory for storing
-            all results; defaults to `$TMPDIR`
+        - dir (str, optional): the path to a directory for storing all results; defaults to `.prefect/`;
+            Note: if the directory does not exist, it will be created.
     """
 
-    def __init__(self, dir: str = None):
+    def __init__(self, dir: str = ".prefect"):
         self.dir = dir
+        if not os.path.exists(self.dir):
+            os.makedirs(self.dir)
         super().__init__()
 
-    def read(self, fpath: str) -> Any:
+    def _full_path(self, key: str) -> str:
+        return os.path.join(self.dir, key)
+
+    def read(self, key: str) -> Any:
         """
         Read a result from the given file location.
 
         Args:
-            - fpath (str): the _absolute_ path to the location of a written result
+            - key (str): the path _relative_ handler path where the result is written
 
         Returns:
             - the read result from the provided file
         """
-        self.logger.debug("Starting to read result from {}...".format(fpath))
-        with open(fpath, "rb") as f:
+        if os.path.isabs(key):
+            raise PrefectError(
+                "Relative path is required (given asbolute): {}".format(key)
+            )
+
+        full_path = self._full_path(key)
+
+        self.logger.debug("Starting to read result from {}...".format(full_path))
+        with open(full_path, "rb") as f:
             val = cloudpickle.loads(f.read())
-        self.logger.debug("Finished reading result from {}...".format(fpath))
+        self.logger.debug("Finished reading result from {}...".format(full_path))
+
         return val
 
-    def write(self, result: Any) -> str:
+    def write(self, key: str, result: Any) -> str:
         """
         Serialize the provided result to local disk.
 
@@ -55,9 +69,16 @@ class LocalResultHandler(ResultHandler):
         Returns:
             - str: the _absolute_ path to the written result on disk
         """
-        fd, loc = tempfile.mkstemp(prefix="prefect-", dir=self.dir)
-        self.logger.debug("Starting to upload result to {}...".format(loc))
-        with open(fd, "wb") as f:
+        if os.path.isabs(key):
+            raise PrefectError(
+                "Relative path is required (given asbolute): {}".format(key)
+            )
+
+        full_path = self._full_path(key)
+
+        self.logger.debug("Starting to write result to {}...".format(full_path))
+        with open(full_path, "wb") as f:
             f.write(cloudpickle.dumps(result))
-        self.logger.debug("Finished uploading result to {}...".format(loc))
-        return loc
+        self.logger.debug("Finished writing result to {}...".format(full_path))
+
+        return os.path.abspath(full_path)

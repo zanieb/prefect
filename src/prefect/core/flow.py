@@ -664,9 +664,20 @@ class Flow:
             - ValueError: if edges refer to tasks that are not in this flow
             - ValueError: if specified reference tasks are not in this flow
             - ValueError: if any tasks do not have assigned IDs
+            - ValueError: if any tasks share the same key
         """
 
         self._cache.clear()
+
+        all_keys = [t.key for t in self.tasks]
+        unique_keys = set(all_keys)
+        if unique_keys != len(all_keys):
+            duplicate_keys = all_keys[:]
+            for key in unique_keys:
+                duplicate_keys.remove(key)
+            raise ValueError(
+                "Duplicate task keys detected: {}".format(", ".join(duplicate_keys))
+            )
 
         if any(e.upstream_task not in self.tasks for e in self.edges) or any(
             e.downstream_task not in self.tasks for e in self.edges

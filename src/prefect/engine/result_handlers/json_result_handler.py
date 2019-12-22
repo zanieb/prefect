@@ -22,7 +22,10 @@ class JSONResultHandler(ResultHandler):
         """
         return json.loads(jblob)
 
-    def write(self, result: Any) -> str:
+    # TODO: this usecase is entirely different, instead of passing enough info to fetch this is an encoding/decoding interface.
+    # This implies that there are two interfaces here?
+
+    def write(self, result: Any, key: str = None) -> str:
         """
         Serialize the provided result to JSON.
 

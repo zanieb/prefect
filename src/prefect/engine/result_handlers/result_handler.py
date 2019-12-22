@@ -21,11 +21,12 @@ class ResultHandler:
     def __repr__(self) -> str:
         return "<ResultHandler: {}>".format(type(self).__name__)
 
-    def write(self, result: Any) -> Any:
+    def write(self, key: str, result: Any) -> Any:
+        # TODO: why is result returned here? in other cases it is metadata about the write, not the value passed in.
         return result
 
-    def read(self, loc: str) -> str:
-        return loc
+    def read(self, key: str) -> str:
+        return key
 
     def __eq__(self, other: object) -> bool:
         """

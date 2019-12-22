@@ -85,7 +85,8 @@ class State:
         if isinstance(value, ResultInterface):
             self._result = value
         else:
-            self._result = Result(value=value)
+            # TODO: how should this be handled?
+            self._result = Result(key=None, value=value)
 
     @classmethod
     def children(cls) -> "List[Type[State]]":

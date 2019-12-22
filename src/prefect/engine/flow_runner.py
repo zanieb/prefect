@@ -433,7 +433,9 @@ class FlowRunner(Runner):
                     )
                     upstream_states[edge] = Success(
                         "Auto-generated constant value",
-                        result=Result(val, result_handler=ConstantResultHandler(val)),
+                        result=Result(
+                            value=val, result_handler=ConstantResultHandler(val)
+                        ),
                     )
 
                 # -- run the task

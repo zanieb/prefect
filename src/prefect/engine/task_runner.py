@@ -19,6 +19,7 @@ from typing import (
 )
 
 import pendulum
+from slugify import slugify
 
 import prefect
 from prefect import config
@@ -724,7 +725,8 @@ class TaskRunner(Runner):
                         # state is not already mapped OR the upstream result is not None.
                         if not state.is_mapped() or upstream_state.result != NoResult:
                             upstream_result = Result(
-                                upstream_state.result[i],
+                                key=upstream_state.result[i].key,
+                                value=upstream_state.result[i],
                                 result_handler=upstream_state._result.result_handler,  # type: ignore
                             )
                             states[edge].result = upstream_result
@@ -895,14 +897,18 @@ class TaskRunner(Runner):
             new_state = exc.state
             assert isinstance(new_state, Looped)
             new_state.result = Result(
-                value=new_state.result, result_handler=self.result_handler
+                key=self.task.key,
+                value=new_state.result,
+                result_handler=self.result_handler,
             )
             new_state.message = exc.state.message or "Task is looping ({})".format(
                 new_state.loop_count
             )
             return new_state
 
-        result = Result(value=result, result_handler=self.result_handler)
+        result = Result(
+            key=self.task.key, value=result, result_handler=self.result_handler
+        )
         state = Success(result=result, message="Task run succeeded.")
 
         ## only checkpoint tasks if checkpointing is turned on
@@ -971,12 +977,17 @@ class TaskRunner(Runner):
         if state.is_failed():
             run_count = prefect.context.get("task_run_count", 1)
             if prefect.context.get("task_loop_count") is not None:
+                task_loop_result_key = "{}:{}".format(
+                    self.task.key, prefect.context["task_loop_count"]
+                )
                 loop_context = {
                     "_loop_count": Result(
+                        key=task_loop_result_key,
                         value=prefect.context["task_loop_count"],
                         result_handler=JSONResultHandler(),
                     ),
                     "_loop_result": Result(
+                        key=task_loop_result_key,
                         value=prefect.context.get("task_loop_result"),
                         result_handler=self.result_handler,
                     ),

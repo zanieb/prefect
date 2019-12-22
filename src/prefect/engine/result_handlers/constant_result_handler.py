@@ -16,21 +16,22 @@ class ConstantResultHandler(ResultHandler):
         self.value = value
         super().__init__()
 
-    def read(self, arg: str) -> Any:
+    def read(self, key: str) -> Any:
         """
         Returns the underlying value regardless of the argument passed.
 
         Args:
-            - arg (str): an unused argument
+            - key (str): an unused argument
         """
         return self.value
 
-    def write(self, result: Any) -> str:
+    def write(self, result: Any, key: str = None) -> str:
         """
         Returns the repr of the underlying value, purely for convenience.
 
         Args:
             - result (Any): the result to represent
+            - key (str): an unused argument
 
         Returns:
             - str: the repr of the result

@@ -17,6 +17,8 @@ from typing import (
     Union,
 )
 
+from slugify import slugify
+
 import prefect
 import prefect.engine.cache_validators
 import prefect.engine.signals
@@ -104,6 +106,8 @@ class Task(metaclass=SignatureValidator):
         - name (str, optional): The name of this task
         - slug (str, optional): The slug for this task. Slugs are required and must be unique
             within any flow; if not provided a random UUID will be generated.
+        - key (str, optional): Should uniquely identify this task within a flow definition and must be the same
+            value accross multiple flow runs; a derivative of the task name is used by default
         - tags ([str], optional): A list of tags for this task
         - max_retries (int, optional): The maximum amount of times this task can be retried
         - retry_delay (timedelta, optional): The amount of time to wait until task is retried
@@ -154,6 +158,7 @@ class Task(metaclass=SignatureValidator):
         self,
         name: str = None,
         slug: str = None,
+        key: str = None,
         tags: Iterable[str] = None,
         max_retries: int = None,
         retry_delay: timedelta = None,
@@ -163,7 +168,7 @@ class Task(metaclass=SignatureValidator):
         cache_for: timedelta = None,
         cache_validator: Callable = None,
         cache_key: str = None,
-        checkpoint: bool = None,
+        checkpoint: bool = True,
         result_handler: "ResultHandler" = None,
         state_handlers: List[Callable] = None,
         on_failure: Callable = None,
@@ -171,7 +176,7 @@ class Task(metaclass=SignatureValidator):
 
         self.name = name or type(self).__name__
         self.slug = slug or str(uuid.uuid4())
-
+        self.key = key or slugify(name)
         self.logger = logging.get_logger("Task: {}".format(self.name))
 
         # avoid silently iterating over a string
