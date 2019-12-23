@@ -60,7 +60,7 @@ class MonitoredCloudFlowRunner:
         self.logger = logging.get_logger(type(self).__name__)
         self.state_thread = None
         self.worker_thread = None
-        self.queue = queue.Queue(maxsize=0)
+        self.queue = queue.Queue()
 
     def _signal_stop(self):
         self.queue.put(QueueItem(event="exit", payload=None))
@@ -126,9 +126,9 @@ class MonitoredCloudFlowRunner:
                     break
         except Exception:
             self.logger.exception("Unhandled exception in the event loop")
-
-        self._on_exit()
-        self.logger.info("Exiting!")
+        finally:
+            self._on_exit()
+            self.logger.info("Exiting!")
 
     def execute_flow_run(self, flow_run_id) -> bool:
 
@@ -187,7 +187,6 @@ class MonitoredCloudFlowRunner:
         return flow_run.state
 
     def stream_flow_run_state_events(self, flow_run_id):
-        self.logger.debug("STATE THREAD")
 
         state = self.fetch_current_flow_run_state(flow_run_id)
 

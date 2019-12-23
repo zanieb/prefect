@@ -20,7 +20,16 @@ from prefect.engine.result import NoResult, Result, ResultInterface, SafeResult
 from prefect.engine.result_handlers import ResultHandler
 
 
-class State:
+class TrackedInheritance(type):
+    __children__: Dict[str, Any] = {}
+
+    def __new__(meta, name, bases, dct):
+        klass = type.__new__(meta, name, bases, dct)
+        meta.__children__[klass.__name__] = klass
+        return klass
+
+
+class State(metaclass=TrackedInheritance):
     """
     Base state class implementing the basic helper methods for checking state.
 
@@ -75,6 +84,10 @@ class State:
 
     def __hash__(self) -> int:
         return id(self)
+
+    @staticmethod
+    def parse(other: str) -> "State":
+        return State.__children__.get(other)
 
     @property
     def result(self) -> Any:
