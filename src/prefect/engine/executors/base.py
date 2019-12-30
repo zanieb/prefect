@@ -69,3 +69,14 @@ class Executor:
             - Any: an iterable of resolved futures
         """
         raise NotImplementedError()
+
+    def shutdown(self, wait=True) -> List[Any]:
+        """
+        Signal the executor that it should cancel current pending work, prevent future work from 
+        being submitted, and optionally wait for any currently running futures to finish execution.
+
+        Args:
+            - wait (bool): wait for any pending work to be completed (defaults to True)
+
+        """
+        raise NotImplementedError()

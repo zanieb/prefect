@@ -95,6 +95,7 @@ class FlowRunner(Runner):
         if task_runner_cls is None:
             task_runner_cls = prefect.engine.get_default_task_runner_class()
         self.task_runner_cls = task_runner_cls
+        self._executor = None
         super().__init__(state_handlers=state_handlers)
 
     def __repr__(self) -> str:
@@ -234,6 +235,8 @@ class FlowRunner(Runner):
         if executor is None:
             executor = prefect.engine.get_default_executor_class()()
 
+        self._executor = executor
+
         try:
             state, task_states, context, task_contexts = self.initialize_run(
                 state=state,
@@ -277,6 +280,11 @@ class FlowRunner(Runner):
             state = self.handle_state_change(state or Pending(), new_state)
 
         return state
+
+    def cancel(self, wait=True) -> List[Any]:
+        if self._executor:
+            return self._executor.shutdown(wait=wait)
+        raise RuntimeError("Flow is not running, thus cannot be cancelled")
 
     @call_state_handlers
     def check_flow_reached_start_time(self, state: State) -> State:

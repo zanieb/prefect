@@ -1,3 +1,4 @@
+import sys
 import collections
 import threading
 import queue
@@ -9,6 +10,7 @@ from prefect.client import Client
 from prefect.utilities.graphql import EnumValue, with_args
 from prefect.utilities import logging
 from prefect.utilities.executors import PeriodicMonitoredCall
+from prefect.engine.state import State, Cancelled
 
 
 @click.group(hidden=True)
@@ -48,7 +50,9 @@ def cloud_flow():
         raise Exception("Not currently executing a flow within a Cloud context.")
 
     runner = MonitoredCloudFlowRunner()
-    runner.run(flow_run_id)
+    success = runner.run(flow_run_id)
+    if not success:
+        sys.exit(1)
 
 
 QueueItem = collections.namedtuple("QueueItem", "event payload")
@@ -61,8 +65,10 @@ class MonitoredCloudFlowRunner:
         self.state_thread = None
         self.worker_thread = None
         self.queue = queue.Queue()
+        self.successful = False
+        self.executor = None
 
-    def _signal_stop(self):
+    def _request_exit(self):
         self.queue.put(QueueItem(event="exit", payload=None))
 
     def _on_exit(self):
@@ -70,21 +76,22 @@ class MonitoredCloudFlowRunner:
         if not was_running:
             self.logger.warning("State thread already stopped before cancellation.")
 
-        self.logger.info("Waiting for flowrunner to finish")
         self.worker_thread.join()
+        self.logger.debug("Exiting")
 
     def check_valid_initial_state(self, flow_run_id):
         state = self.fetch_current_flow_run_state(flow_run_id)
-        return state != "Cancelled"
+        return state != Cancelled
 
     def run(self, flow_run_id):
-
+        self.logger.debug("Starting")
         if not self.check_valid_initial_state(flow_run_id):
-            raise RuntimeError("Flow run was cancelled")
+            raise RuntimeError("Flow run initial state is invalid. It will not be run!")
 
-        # TODO: start a state listener thread, pulling states for this flow run id from cloud. Events are reported back to the main thread (here)
-        # why a separate thread? among other reasons, when we start doing subscriptions later, it will continue to work with no modifications
-
+        # start a state listener thread, pulling states for this flow run id from cloud.
+        # Events are reported back to the main thread (here). Why a separate thread?
+        # Among other reasons, when we start doing subscriptions later, it will continue
+        # to work with no modifications
         self.state_thread = PeriodicMonitoredCall(
             interval=10,
             function=self.stream_flow_run_state_events,
@@ -100,38 +107,40 @@ class MonitoredCloudFlowRunner:
                 self.execute_flow_run(flow_run_id)
             except Exception:
                 self.logger.exception("Error occured on run")
-            finally:
-                self._signal_stop()
 
-        # note: this creates a flow runner which has a cloud heartbeat
+            self.logger.debug("Flowrunner completed")
+            self._request_exit()
+
+        # note: this creates a cloud flow runner which has a heartbeat
         self.worker_thread = threading.Thread(target=controlled_run)
         self.worker_thread.start()
 
-        # TODO: main thread here: listen for events from a queue
-        # wait for shutdown event, which could be a threading.Event? (no, then we'll have to wait)
-        # I'd rather loop on a select in main
+        # handle all flow state events of interest as well as exit requests
         try:
             while True:
                 item = self.queue.get()
                 if item is None:
                     break
+                elif not isinstance(item, QueueItem):
+                    self.logger.warning("Bad event: {}".format(repr(item)))
+                    continue
 
-                # TODO: parse state from rich object
-                if item.event == "state" and item.payload == "Cancelled":
-                    # TODO: call cancel to flow executor
+                if item.event == "state" and item.payload == Cancelled:
+                    # TODO: call cancel to flow executor to prevent scheduiling of future work
 
-                    self._signal_stop()
+                    self._request_exit()
                 elif item.event == "exit":
-                    self.logger.debug("Requested to stop event loop")
                     break
+                else:
+                    self.logger.warning("Unknown event: {}".format(item))
+                    continue
         except Exception:
             self.logger.exception("Unhandled exception in the event loop")
-        finally:
-            self._on_exit()
-            self.logger.info("Exiting!")
+
+        self._on_exit()
+        return self.successful
 
     def execute_flow_run(self, flow_run_id) -> bool:
-
         query = {
             "query": {
                 with_args("flow_run", {"where": {"id": {"_eq": flow_run_id}}}): {
@@ -144,9 +153,7 @@ class MonitoredCloudFlowRunner:
         result = self.client.graphql(query)
 
         if not result.data.flow_run:
-            # TODO: no click allowed here
-            # click.echo("Flow run {} not found".format(flow_run_id))
-            raise RuntimeError("Could not fetch runtime data")
+            raise RuntimeError("Flow run {} not found".format(flow_run_id))
 
         flow_run = result.data.flow_run[0]
 
@@ -161,6 +168,8 @@ class MonitoredCloudFlowRunner:
             environment.execute(
                 storage=storage, flow_location=storage.flows[flow_run.flow.name]
             )
+
+            self.successful = True
         except Exception as exc:
             msg = "Failed to load and execute Flow's environment: {}".format(repr(exc))
             state = prefect.engine.state.Failed(message=msg)
@@ -168,9 +177,6 @@ class MonitoredCloudFlowRunner:
                 flow_run_id=flow_run_id, version=flow_run.version, state=state
             )
 
-            # TODO: no click allowed here
-            # click.echo(str(exc))
-            # TODO: should we raise here? or return an event?
             raise exc
 
     def fetch_current_flow_run_state(self, flow_run_id):
@@ -184,10 +190,9 @@ class MonitoredCloudFlowRunner:
         }
 
         flow_run = self.client.graphql(query).data.flow_run_by_pk
-        return flow_run.state
+        return State.parse(flow_run.state)
 
     def stream_flow_run_state_events(self, flow_run_id):
-
         state = self.fetch_current_flow_run_state(flow_run_id)
 
         # note: currently we are polling the latest known state. In the future when subscriptions are
@@ -195,6 +200,5 @@ class MonitoredCloudFlowRunner:
         # without duplicates. Until then, we will apply filtering of the states we want to see before
         # it hits the queue here instead of the main thread.
 
-        # TODO: parse state from rich object
-        if state == "Cancelled":
+        if state == Cancelled:
             self.queue.put(QueueItem(event="state", payload=state))

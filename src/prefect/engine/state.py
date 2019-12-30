@@ -85,9 +85,9 @@ class State(metaclass=TrackedInheritance):
     def __hash__(self) -> int:
         return id(self)
 
-    @staticmethod
-    def parse(other: str) -> "State":
-        return State.__children__.get(other)
+    @classmethod
+    def parse(cls, other: str) -> Any:
+        return cls.__children__.get(other)
 
     @property
     def result(self) -> Any:
