@@ -295,7 +295,7 @@ class TestCronClock:
         every_day = "0 0 * * *"
         start_date = pendulum.datetime(2050, 1, 1, 0, 0, 0, 1)
         c = clocks.CronClock(every_day, start_date=start_date)
-        assert islice(c.events(), 1) == [pendulum.datetime(2050, 1, 2)]
+        assert islice(c.events(), 1) == [pendulum.datetime(2050, 1, 1)]
 
 
 class TestCronClockDaylightSavingsTime:
