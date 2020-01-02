@@ -95,46 +95,6 @@ class Runner:
     def _heartbeat(self) -> bool:
         return False
 
-    def initialize_run(
-        self, state: Optional[State], context: Dict[str, Any]
-    ) -> Tuple[State, Dict[str, Any]]:
-        """
-        Initializes the Task run by initializing state and context appropriately.
-
-        If the provided state is a meta state, the state it wraps is extracted.
-
-        Args:
-            - state (Optional[State]): the initial state of the run
-            - context (dict): the context to be updated with relevant information
-
-        Returns:
-            - tuple: a tuple of the updated state and context objects
-        """
-
-        # extract possibly nested meta states -> for example a Submitted( Queued( Retry ) )
-        while isinstance(state, State) and state.is_meta_state():
-            state = state.state  # type: ignore
-
-        state = state or Pending()
-
-        return state, context
-
-    def call_runner_target_handlers(self, old_state: State, new_state: State) -> State:
-        """
-        Runners are used to execute a target object, usually a `Task` or a `Flow`, and those
-        objects may have state handlers of their own. This method will always be called as
-        the Runner's first state handler, and provides an entrypoint that can be overriden
-        to target either a Task or Flow's own handlers.
-
-        Args:
-            - old_state (State): the old (previous) state
-            - new_state (State): the new (current) state
-
-        Returns:
-            State: the new state
-        """
-        return new_state
-
     def handle_state_change(self, old_state: State, new_state: State) -> State:
         """
         Calls any handlers associated with the Runner
@@ -157,9 +117,6 @@ class Runner:
         raise_on_exception = prefect.context.get("raise_on_exception", False)
 
         try:
-            # call runner's target handlers
-            new_state = self.call_runner_target_handlers(old_state, new_state)
-
             # call runner's own handlers
             for handler in self.state_handlers:
                 new_state = handler(self, old_state, new_state) or new_state
