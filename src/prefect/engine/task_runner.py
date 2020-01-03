@@ -25,6 +25,7 @@ from prefect import config
 from prefect.core import Edge, Task
 from prefect.engine import signals
 from prefect.engine.result import NoResult, Result
+from prefect.engine.task_run import TaskRun
 from prefect.engine.result_handlers import JSONResultHandler, ResultHandler
 from prefect.engine.runner import ENDRUN, Runner, call_state_handlers
 from prefect.engine.state import (
@@ -85,118 +86,33 @@ class TaskRunner(Runner):
 
     def __init__(
         self,
-        task: Task,
+        run: TaskRun,
         state_handlers: Iterable[Callable] = None,
         result_handler: "ResultHandler" = None,
     ):
         self.context = prefect.context.to_dict()
-        self.task = task
-        self.result_handler = task.result_handler or result_handler
+        self.run_store = run
+        self.result_handler = self.run_store.task.result_handler or result_handler
         super().__init__(state_handlers=state_handlers)
 
     def __repr__(self) -> str:
-        return "<{}: {}>".format(type(self).__name__, self.task.name)
-
-    def call_runner_target_handlers(self, old_state: State, new_state: State) -> State:
-        """
-        A special state handler that the TaskRunner uses to call its task's state handlers.
-        This method is called as part of the base Runner's `handle_state_change()` method.
-
-        Args:
-            - old_state (State): the old (previous) state
-            - new_state (State): the new (current) state
-
-        Returns:
-            - State: the new state
-        """
-        self.logger.debug(
-            "Task '{name}': Handling state change from {old} to {new}".format(
-                name=prefect.context.get("task_full_name", self.task.name),
-                old=type(old_state).__name__,
-                new=type(new_state).__name__,
-            )
-        )
-        for handler in self.task.state_handlers:
-            new_state = handler(self.task, old_state, new_state) or new_state
-
-        return new_state
-
-    def initialize_run(  # type: ignore
-        self, state: Optional[State], context: Dict[str, Any]
-    ) -> TaskRunnerInitializeResult:
-        """
-        Initializes the Task run by initializing state and context appropriately.
-
-        If the task is being retried, then we retrieve the run count from the initial Retry
-        state. Otherwise, we assume the run count is 1. The run count is stored in context as
-        task_run_count.
-
-        Also, if the task is being resumed through a `Resume` state, updates context to have `resume=True`.
-
-        Args:
-            - state (Optional[State]): the initial state of the run
-            - context (Dict[str, Any]): the context to be updated with relevant information
-
-        Returns:
-            - tuple: a tuple of the updated state, context, upstream_states, and inputs objects
-        """
-        state, context = super().initialize_run(state=state, context=context)
-
-        if isinstance(state, Retrying):
-            run_count = state.run_count + 1
-        else:
-            run_count = state.context.get("task_run_count", 1)
-
-        if isinstance(state, Resume):
-            context.update(resume=True)
-
-        if hasattr(state, "cached_inputs"):
-            if "_loop_count" in (state.cached_inputs or {}):  # type: ignore
-                loop_context = {
-                    "task_loop_count": state.cached_inputs.pop(  # type: ignore
-                        "_loop_count"
-                    )  # type: ignore
-                    .to_result()
-                    .value,
-                    "task_loop_result": state.cached_inputs.pop(  # type: ignore
-                        "_loop_result"
-                    )  # type: ignore
-                    .to_result()
-                    .value,
-                }
-                context.update(loop_context)
-
-        context.update(
-            task_run_count=run_count,
-            task_name=self.task.name,
-            task_tags=self.task.tags,
-            task_slug=self.task.slug,
-        )
-        context.setdefault("checkpointing", config.flows.checkpointing)
-        context.update(logger=self.task.logger)
-
-        return TaskRunnerInitializeResult(state=state, context=context)
+        return "<{}: {}>".format(type(self).__name__, self.run_store.task.name)
 
     @tail_recursive
     def run(
         self,
-        state: State = None,
         upstream_states: Dict[Edge, State] = None,
-        context: Dict[str, Any] = None,
         executor: "prefect.engine.executors.Executor" = None,
     ) -> State:
         """
         The main endpoint for TaskRunners.  Calling this method will conditionally execute
-        `self.task.run` with any provided inputs, assuming the upstream dependencies are in a
+        `self.run_store.task.run` with any provided inputs, assuming the upstream dependencies are in a
         state which allow this Task to run.
 
         Args:
-            - state (State, optional): initial `State` to begin task run from;
-                defaults to `Pending()`
             - upstream_states (Dict[Edge, State]): a dictionary
                 representing the states of any tasks upstream of this one. The keys of the
                 dictionary should correspond to the edges leading to the task.
-            - context (dict, optional): prefect Context to use for execution
             - executor (Executor, optional): executor to use when performing
                 computation; defaults to the executor specified in your prefect configuration
 
@@ -204,10 +120,9 @@ class TaskRunner(Runner):
             - `State` object representing the final post-run state of the Task
         """
         upstream_states = upstream_states or {}
-        context = context or {}
-        map_index = context.setdefault("map_index", None)
-        context["task_full_name"] = "{name}{index}".format(
-            name=self.task.name,
+        map_index = self.run_store.context.setdefault("map_index", None)
+        self.run_store.context["task_full_name"] = "{name}{index}".format(
+            name=self.run_store.task.name,
             index=("" if map_index is None else "[{}]".format(map_index)),
         )
 
@@ -223,85 +138,96 @@ class TaskRunner(Runner):
         task_inputs = {}  # type: Dict[str, Any]
 
         try:
-            # initialize the run
-            state, context = self.initialize_run(state, context)
-
             # run state transformation pipeline
-            with prefect.context(context):
+            with prefect.context(self.run_store.context):
 
                 if prefect.context.get("task_loop_count") is None:
                     self.logger.info(
                         "Task '{name}': Starting task run...".format(
-                            name=context["task_full_name"]
+                            name=self.run_store.context["task_full_name"]
                         )
                     )
 
                 # check to make sure the task is in a pending state
-                state = self.check_task_is_ready(state)
+                self.run_store.state = self.check_task_is_ready(self.run_store.state)
 
                 # check if the task has reached its scheduled time
-                state = self.check_task_reached_start_time(state)
+                self.run_store.state = self.check_task_reached_start_time(
+                    self.run_store.state
+                )
 
                 # Tasks never run if the upstream tasks haven't finished
-                state = self.check_upstream_finished(
-                    state, upstream_states=upstream_states
+                self.run_store.state = self.check_upstream_finished(
+                    self.run_store.state, upstream_states=upstream_states
                 )
 
                 # check if any upstream tasks skipped (and if we need to skip)
-                state = self.check_upstream_skipped(
-                    state, upstream_states=upstream_states
+                self.run_store.state = self.check_upstream_skipped(
+                    self.run_store.state, upstream_states=upstream_states
                 )
 
                 # if the task is mapped, process the mapped children and exit
                 if mapped:
-                    state = self.run_mapped_task(
-                        state=state,
+                    self.run_store.state = self.run_mapped_task(
+                        state=self.run_store.state,
                         upstream_states=upstream_states,
-                        context=context,
+                        context=self.run_store.context,
                         executor=executor,
                     )
 
-                    state = self.wait_for_mapped_task(state=state, executor=executor)
+                    self.run_store.state = self.wait_for_mapped_task(
+                        state=self.run_store.state, executor=executor
+                    )
 
                     self.logger.debug(
                         "Task '{name}': task has been mapped; ending run.".format(
-                            name=context["task_full_name"]
+                            name=self.run_store.context["task_full_name"]
                         )
                     )
-                    raise ENDRUN(state)
+                    raise ENDRUN(self.run_store.state)
 
                 # retrieve task inputs from upstream and also explicitly passed inputs
                 task_inputs = self.get_task_inputs(
-                    state=state, upstream_states=upstream_states
+                    state=self.run_store.state, upstream_states=upstream_states
                 )
 
                 # check to see if the task has a cached result
-                state = self.check_task_is_cached(state, inputs=task_inputs)
+                self.run_store.state = self.check_task_is_cached(
+                    self.run_store.state, inputs=task_inputs
+                )
 
                 # check if the task's trigger passes
                 # triggers can raise Pauses, which require task_inputs to be available for caching
                 # so we run this after the previous step
-                state = self.check_task_trigger(state, upstream_states=upstream_states)
+                self.run_store.state = self.check_task_trigger(
+                    self.run_store.state, upstream_states=upstream_states
+                )
 
                 # set the task state to running
-                state = self.set_task_to_running(state)
+                self.run_store.state = self.set_task_to_running(self.run_store.state)
 
                 # run the task
-                state = self.get_task_run_state(
-                    state, inputs=task_inputs, timeout_handler=executor.timeout_handler
+                self.run_store.state = self.get_task_run_state(
+                    self.run_store.state,
+                    inputs=task_inputs,
+                    timeout_handler=executor.timeout_handler,
                 )
 
                 # cache the output, if appropriate
-                state = self.cache_result(state, inputs=task_inputs)
+                self.run_store.state = self.cache_result(
+                    self.run_store.state, inputs=task_inputs
+                )
 
                 # check if the task needs to be retried
-                state = self.check_for_retry(state, inputs=task_inputs)
+                self.run_store.state = self.check_for_retry(
+                    self.run_store.state, inputs=task_inputs
+                )
 
-                state = self.check_task_is_looping(
-                    state,
+                self.run_store.state = self.check_task_is_looping(
+                    self.run_store.state,
                     inputs=task_inputs,
                     upstream_states=upstream_states,
-                    context=context,
+                    context=self.run_store.context,
                     executor=executor,
                 )
 
@@ -310,16 +236,16 @@ class TaskRunner(Runner):
         except (ENDRUN, signals.PrefectStateSignal) as exc:
             if exc.state.is_pending() or exc.state.is_failed():
                 exc.state.cached_inputs = task_inputs or {}  # type: ignore
-            state = exc.state
+            self.run_store.state = exc.state
         except RecursiveCall as exc:
             raise exc
 
         except Exception as exc:
             msg = "Task '{name}': unexpected error while running task: {exc}".format(
-                name=context["task_full_name"], exc=repr(exc)
+                name=self.run_store.context["task_full_name"], exc=repr(exc)
             )
             self.logger.exception(msg)
-            state = Failed(message=msg, result=exc)
+            self.run_store.state = Failed(message=msg, result=exc)
             if prefect.context.get("raise_on_exception"):
                 raise exc
 
@@ -329,16 +255,17 @@ class TaskRunner(Runner):
         if prefect.context.get("task_loop_count") is None:
             # wrapping this final log in prefect.context(context) ensures
             # that any run-context, including task-run-ids, are respected
-            with prefect.context(context):
+            with prefect.context(self.run_store.context):
                 self.logger.info(
                     "Task '{name}': finished task run for task with final state: '{state}'".format(
-                        name=context["task_full_name"], state=type(state).__name__
+                        name=self.run_store.context["task_full_name"],
+                        state=type(self.run_store.state).__name__,
                     )
                 )
 
-        return state
+        return self.run_store.state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_upstream_finished(
         self, state: State, upstream_states: Dict[Edge, State]
     ) -> State:
@@ -368,13 +295,13 @@ class TaskRunner(Runner):
         if not all(s.is_finished() for s in all_states):
             self.logger.debug(
                 "Task '{name}': not all upstream states are finished; ending run.".format(
-                    name=prefect.context.get("task_full_name", self.task.name)
+                    name=prefect.context.get("task_full_name", self.run_store.task.name)
                 )
             )
             raise ENDRUN(state)
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_upstream_skipped(
         self, state: State, upstream_states: Dict[Edge, State]
     ) -> State:
@@ -400,10 +327,12 @@ class TaskRunner(Runner):
             else:
                 all_states.add(upstream_state)
 
-        if self.task.skip_on_upstream_skip and any(s.is_skipped() for s in all_states):
+        if self.run_store.task.skip_on_upstream_skip and any(
+            s.is_skipped() for s in all_states
+        ):
             self.logger.debug(
                 "Task '{name}': Upstream states were skipped; ending run.".format(
-                    name=prefect.context.get("task_full_name", self.task.name)
+                    name=prefect.context.get("task_full_name", self.run_store.task.name)
                 )
             )
             raise ENDRUN(
@@ -417,7 +346,7 @@ class TaskRunner(Runner):
             )
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_task_trigger(
         self, state: State, upstream_states: Dict[Edge, State]
     ) -> State:
@@ -443,14 +372,16 @@ class TaskRunner(Runner):
                 all_states.add(upstream_state)
 
         try:
-            if not self.task.trigger(all_states):
+            if not self.run_store.task.trigger(all_states):
                 raise signals.TRIGGERFAIL(message="Trigger failed")
 
         except signals.PrefectStateSignal as exc:
 
             self.logger.debug(
                 "Task '{name}': {signal} signal raised during execution.".format(
-                    name=prefect.context.get("task_full_name", self.task.name),
+                    name=prefect.context.get(
+                        "task_full_name", self.run_store.task.name
+                    ),
                     signal=type(exc).__name__,
                 )
             )
@@ -463,7 +394,9 @@ class TaskRunner(Runner):
             self.logger.exception(
                 "Task '{name}': unexpected error while evaluating task trigger: {exc}".format(
                     exc=repr(exc),
-                    name=prefect.context.get("task_full_name", self.task.name),
+                    name=prefect.context.get(
+                        "task_full_name", self.run_store.task.name
+                    ),
                 )
             )
             if prefect.context.get("raise_on_exception"):
@@ -479,7 +412,7 @@ class TaskRunner(Runner):
 
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_task_is_ready(self, state: State) -> State:
         """
         Checks to make sure the task is ready to run (Pending or Mapped).
@@ -503,7 +436,8 @@ class TaskRunner(Runner):
         elif state.is_mapped():
             self.logger.debug(
                 "Task '{name}': task is mapped, but run will proceed so children are generated.".format(
-                    name=prefect.context.get("task_full_name", self.task.name)
+                    # TODO: should this be self.run_store.context...?
+                    name=prefect.context.get("task_full_name", self.run_store.task.name)
                 )
             )
             return state
@@ -512,7 +446,8 @@ class TaskRunner(Runner):
         elif state.is_running():
             self.logger.debug(
                 "Task '{name}': task is already running.".format(
-                    name=prefect.context.get("task_full_name", self.task.name)
+                    # TODO: should this be self.run_store.context...?
+                    name=prefect.context.get("task_full_name", self.run_store.task.name)
                 )
             )
             raise ENDRUN(state)
@@ -524,7 +459,8 @@ class TaskRunner(Runner):
         elif state.is_finished():
             self.logger.debug(
                 "Task '{name}': task is already finished.".format(
-                    name=prefect.context.get("task_full_name", self.task.name)
+                    # TODO: should this be self.run_store.context...?
+                    name=prefect.context.get("task_full_name", self.run_store.task.name)
                 )
             )
             raise ENDRUN(state)
@@ -533,13 +469,16 @@ class TaskRunner(Runner):
         else:
             self.logger.debug(
                 "Task '{name}' is not ready to run or state was unrecognized ({state}).".format(
-                    name=prefect.context.get("task_full_name", self.task.name),
+                    # TODO: should this be self.run_store.context...?
+                    name=prefect.context.get(
+                        "task_full_name", self.run_store.task.name
+                    ),
                     state=state,
                 )
             )
             raise ENDRUN(state)
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_task_reached_start_time(self, state: State) -> State:
         """
         Checks if a task is in a Scheduled state and, if it is, ensures that the scheduled
@@ -558,7 +497,9 @@ class TaskRunner(Runner):
             if state.start_time and state.start_time > pendulum.now("utc"):
                 self.logger.debug(
                     "Task '{name}': start_time has not been reached; ending run.".format(
-                        name=prefect.context.get("task_full_name", self.task.name)
+                        name=prefect.context.get(
+                            "task_full_name", self.run_store.task.name
+                        )
                     )
                 )
                 raise ENDRUN(state)
@@ -605,7 +546,7 @@ class TaskRunner(Runner):
             )
         return task_inputs
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_task_is_cached(self, state: State, inputs: Dict[str, Result]) -> State:
         """
         Checks if task is cached and whether the cache is still valid.
@@ -624,33 +565,35 @@ class TaskRunner(Runner):
         if state.is_cached():
             assert isinstance(state, Cached)  # mypy assert
             sanitized_inputs = {key: res.value for key, res in inputs.items()}
-            if self.task.cache_validator(
+            if self.run_store.task.cache_validator(
                 state, sanitized_inputs, prefect.context.get("parameters")
             ):
-                state._result = state._result.to_result(self.task.result_handler)
+                state._result = state._result.to_result(
+                    self.run_store.task.result_handler
+                )
                 return state
             else:
                 state = Pending("Cache was invalid; ready to run.")
 
-        if self.task.cache_for is not None:
+        if self.run_store.task.cache_for is not None:
             candidate_states = prefect.context.caches.get(
-                self.task.cache_key or self.task.name, []
+                self.run_store.task.cache_key or self.run_store.task.name, []
             )
             sanitized_inputs = {key: res.value for key, res in inputs.items()}
             for candidate in candidate_states:
-                if self.task.cache_validator(
+                if self.run_store.task.cache_validator(
                     candidate, sanitized_inputs, prefect.context.get("parameters")
                 ):
                     candidate._result = candidate._result.to_result(
-                        self.task.result_handler
+                        self.run_store.task.result_handler
                     )
                     return candidate
 
-        if self.task.cache_for is not None:
+        if self.run_store.task.cache_for is not None:
             self.logger.warning(
                 "Task '{name}': can't use cache because it "
                 "is now invalid".format(
-                    name=prefect.context.get("task_full_name", self.task.name)
+                    name=prefect.context.get("task_full_name", self.run_store.task.name)
                 )
             )
         return state or Pending("Cache was invalid; ready to run.")
@@ -741,13 +684,7 @@ class TaskRunner(Runner):
             map_context = context.copy()
             map_context.update(map_index=map_index)
             with prefect.context(self.context):
-                return self.run(
-                    upstream_states=upstream_states,
-                    # if we set the state here, then it will not be processed by `initialize_run()`
-                    state=state,
-                    context=map_context,
-                    executor=executor,
-                )
+                return self.run(upstream_states=upstream_states, executor=executor,)
 
         # generate initial states, if available
         if isinstance(state, Mapped):
@@ -777,7 +714,7 @@ class TaskRunner(Runner):
         )
         return self.handle_state_change(old_state=state, new_state=new_state)
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def wait_for_mapped_task(
         self, state: State, executor: "prefect.engine.executors.Executor"
     ) -> State:
@@ -796,7 +733,7 @@ class TaskRunner(Runner):
             state.map_states = executor.wait(state.map_states)
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def set_task_to_running(self, state: State) -> State:
         """
         Sets the task to running
@@ -814,7 +751,7 @@ class TaskRunner(Runner):
             self.logger.debug(
                 "Task '{name}': can't set state to Running because it "
                 "isn't Pending; ending run.".format(
-                    name=prefect.context.get("task_full_name", self.task.name)
+                    name=prefect.context.get("task_full_name", self.run_store.task.name)
                 )
             )
             raise ENDRUN(state)
@@ -823,7 +760,7 @@ class TaskRunner(Runner):
         return new_state
 
     @run_with_heartbeat
-    @call_state_handlers
+    @Runner.call_state_handlers
     def get_task_run_state(
         self,
         state: State,
@@ -853,7 +790,7 @@ class TaskRunner(Runner):
             self.logger.debug(
                 "Task '{name}': can't run task because it's not in a "
                 "Running state; ending run.".format(
-                    name=prefect.context.get("task_full_name", self.task.name)
+                    name=prefect.context.get("task_full_name", self.run_store.task.name)
                 )
             )
 
@@ -862,7 +799,7 @@ class TaskRunner(Runner):
         try:
             self.logger.debug(
                 "Task '{name}': Calling task.run() method...".format(
-                    name=prefect.context.get("task_full_name", self.task.name)
+                    name=prefect.context.get("task_full_name", self.run_store.task.name)
                 )
             )
             timeout_handler = (
@@ -870,7 +807,9 @@ class TaskRunner(Runner):
             )
             raw_inputs = {k: r.value for k, r in inputs.items()}
             result = timeout_handler(
-                self.task.run, timeout=self.task.timeout, **raw_inputs
+                self.run_store.task.run,
+                timeout=self.run_store.task.timeout,
+                **raw_inputs
             )
 
         except KeyboardInterrupt:
@@ -905,13 +844,13 @@ class TaskRunner(Runner):
         if (
             state.is_successful()
             and prefect.context.get("checkpointing") is True
-            and self.task.checkpoint is True
+            and self.run_store.task.checkpoint is True
         ):
             state._result.store_safe_value()
 
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def cache_result(self, state: State, inputs: Dict[str, Result]) -> State:
         """
         Caches the result of a successful task, if appropriate. Alternatively,
@@ -937,9 +876,9 @@ class TaskRunner(Runner):
         if (
             state.is_successful()
             and not state.is_skipped()
-            and self.task.cache_for is not None
+            and self.run_store.task.cache_for is not None
         ):
-            expiration = pendulum.now("utc") + self.task.cache_for
+            expiration = pendulum.now("utc") + self.run_store.task.cache_for
             cached_state = Cached(
                 result=state._result,
                 cached_inputs=inputs,
@@ -951,7 +890,7 @@ class TaskRunner(Runner):
 
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_for_retry(self, state: State, inputs: Dict[str, Result]) -> State:
         """
         Checks to see if a FAILED task should be retried.
@@ -978,10 +917,10 @@ class TaskRunner(Runner):
                     ),
                 }
                 inputs.update(loop_context)
-            if run_count <= self.task.max_retries:
-                start_time = pendulum.now("utc") + self.task.retry_delay
+            if run_count <= self.run_store.task.max_retries:
+                start_time = pendulum.now("utc") + self.run_store.task.retry_delay
                 msg = "Retrying Task (after attempt {n} of {m})".format(
-                    n=run_count, m=self.task.max_retries + 1
+                    n=run_count, m=self.run_store.task.max_retries + 1
                 )
                 retry_state = Retrying(
                     start_time=start_time,

@@ -16,9 +16,10 @@ import pendulum
 import prefect
 from prefect.core import Edge, Flow, Task
 from prefect.engine import signals
+from prefect.engine.flow_run import FlowRun
 from prefect.engine.result import Result
 from prefect.engine.result_handlers import ConstantResultHandler
-from prefect.engine.runner import ENDRUN, Runner, call_state_handlers
+from prefect.engine.runner import ENDRUN, Runner
 from prefect.engine.state import (
     Cancelled,
     Failed,
@@ -33,16 +34,6 @@ from prefect.engine.state import (
 from prefect.engine.task_runner import TaskRunner
 from prefect.utilities.collections import flatten_seq
 from prefect.utilities.executors import run_with_heartbeat
-
-FlowRunnerInitializeResult = NamedTuple(
-    "FlowRunnerInitializeResult",
-    [
-        ("state", State),
-        ("task_states", Dict[Task, State]),
-        ("context", Dict[str, Any]),
-        ("task_contexts", Dict[Task, Dict[str, Any]]),
-    ],
-)
 
 
 class FlowRunner(Runner):
@@ -79,178 +70,76 @@ class FlowRunner(Runner):
     with Flow("My Flow") as f:
         say_hello()
 
-    fr = FlowRunner(flow=f)
-    flow_state = fr.run()
+    fr = FlowRunner(run=FlowRun(flow=f))
+    run = fr.run()
+
+    run.state
+    run.result
     ```
     """
 
     def __init__(
         self,
-        flow: Flow,
+        run: FlowRun,
         task_runner_cls: type = None,
         state_handlers: Iterable[Callable] = None,
     ):
         self.context = prefect.context.to_dict()
-        self.flow = flow
+        self.run_store = run
         if task_runner_cls is None:
             task_runner_cls = prefect.engine.get_default_task_runner_class()
         self.task_runner_cls = task_runner_cls
+
         super().__init__(state_handlers=state_handlers)
 
+        for handler in self.run_store.handlers():
+            self.register_handler(handler)
+
     def __repr__(self) -> str:
-        return "<{}: {}>".format(type(self).__name__, self.flow.name)
+        return "<{}: {}>".format(type(self).__name__, self.run_store.flow.name)
 
-    def call_runner_target_handlers(self, old_state: State, new_state: State) -> State:
-        """
-        A special state handler that the FlowRunner uses to call its flow's state handlers.
-        This method is called as part of the base Runner's `handle_state_change()` method.
-
-        Args:
-            - old_state (State): the old (previous) state
-            - new_state (State): the new (current) state
-
-        Returns:
-            - State: the new state
-        """
-        self.logger.debug(
-            "Flow '{name}': Handling state change from {old} to {new}".format(
-                name=self.flow.name,
-                old=type(old_state).__name__,
-                new=type(new_state).__name__,
-            )
-        )
-        for handler in self.flow.state_handlers:
-            new_state = handler(self.flow, old_state, new_state) or new_state
-
-        return new_state
-
-    def initialize_run(  # type: ignore
-        self,
-        state: Optional[State],
-        task_states: Dict[Task, State],
-        context: Dict[str, Any],
-        task_contexts: Dict[Task, Dict[str, Any]],
-        parameters: Dict[str, Any],
-    ) -> FlowRunnerInitializeResult:
-        """
-        Initializes the Task run by initializing state and context appropriately.
-
-        If the provided state is a Submitted state, the state it wraps is extracted.
-
-        Args:
-            - state (Optional[State]): the initial state of the run
-            - task_states (Dict[Task, State]): a dictionary of any initial task states
-            - context (Dict[str, Any], optional): prefect.Context to use for execution
-                to use for each Task run
-            - task_contexts (Dict[Task, Dict[str, Any]], optional): contexts that will be provided to each task
-            - parameters(dict): the parameter values for the run
-
-        Returns:
-            - NamedTuple: a tuple of initialized objects:
-                `(state, task_states, context, task_contexts)`
-        """
-
-        # overwrite context parameters one-by-one
-        if parameters:
-            context_params = context.setdefault("parameters", {})
-            for param, value in parameters.items():
-                context_params[param] = value
-
-        context.update(flow_name=self.flow.name)
-        context.setdefault("scheduled_start_time", pendulum.now("utc"))
-
-        # add various formatted dates to context
-        now = pendulum.now("utc")
-        dates = {
-            "date": now,
-            "today": now.strftime("%Y-%m-%d"),
-            "yesterday": now.add(days=-1).strftime("%Y-%m-%d"),
-            "tomorrow": now.add(days=1).strftime("%Y-%m-%d"),
-            "today_nodash": now.strftime("%Y%m%d"),
-            "yesterday_nodash": now.add(days=-1).strftime("%Y%m%d"),
-            "tomorrow_nodash": now.add(days=1).strftime("%Y%m%d"),
-        }
-        for key, val in dates.items():
-            context.setdefault(key, val)
-
-        for task in self.flow.tasks:
-            task_contexts.setdefault(task, {}).update(
-                task_name=task.name, task_slug=task.slug
-            )
-        state, context = super().initialize_run(state=state, context=context)
-        return FlowRunnerInitializeResult(
-            state=state,
-            task_states=task_states,
-            context=context,
-            task_contexts=task_contexts,
-        )
+    # TODO: MISSING HEARTBEAT! REQUIRED FOR CLOUD
 
     def run(
         self,
-        state: State = None,
-        task_states: Dict[Task, State] = None,
         return_tasks: Iterable[Task] = None,
-        parameters: Dict[str, Any] = None,
         task_runner_state_handlers: Iterable[Callable] = None,
         executor: "prefect.engine.executors.Executor" = None,
-        context: Dict[str, Any] = None,
-        task_contexts: Dict[Task, Dict[str, Any]] = None,
     ) -> State:
         """
         The main endpoint for FlowRunners.  Calling this method will perform all
         computations contained within the Flow and return the final state of the Flow.
 
         Args:
-            - state (State, optional): starting state for the Flow. Defaults to
-                `Pending`
-            - task_states (dict, optional): dictionary of task states to begin
-                computation with, with keys being Tasks and values their corresponding state
             - return_tasks ([Task], optional): list of Tasks to include in the
                 final returned Flow state. Defaults to `None`
-            - parameters (dict, optional): dictionary of any needed Parameter
-                values, with keys being strings representing Parameter names and values being
-                their corresponding values
             - task_runner_state_handlers (Iterable[Callable], optional): A list of state change
                 handlers that will be provided to the task_runner, and called whenever a task changes
                 state.
             - executor (Executor, optional): executor to use when performing
                 computation; defaults to the executor specified in your prefect configuration
-            - context (Dict[str, Any], optional): prefect.Context to use for execution
-                to use for each Task run
-            - task_contexts (Dict[Task, Dict[str, Any]], optional): contexts that will be provided to each task
 
         Returns:
             - State: `State` representing the final post-run state of the `Flow`.
 
         """
 
-        self.logger.info("Beginning Flow run for '{}'".format(self.flow.name))
+        self.logger.info("Beginning Flow run for '{}'".format(self.run_store.flow.name))
 
-        # make copies to avoid modifying user inputs
-        task_states = dict(task_states or {})
-        context = dict(context or {})
-        task_contexts = dict(task_contexts or {})
-        parameters = dict(parameters or {})
         if executor is None:
             executor = prefect.engine.get_default_executor_class()()
 
         try:
-            state, task_states, context, task_contexts = self.initialize_run(
-                state=state,
-                task_states=task_states,
-                context=context,
-                task_contexts=task_contexts,
-                parameters=parameters,
-            )
 
-            with prefect.context(context):
-                state = self.check_flow_is_pending_or_running(state)
-                state = self.check_flow_reached_start_time(state)
-                state = self.set_flow_to_running(state)
-                state = self.get_flow_run_state(
-                    state,
-                    task_states=task_states,
-                    task_contexts=task_contexts,
+            with prefect.context(self.run_store.context):
+                self.run_store.state = self.check_flow_is_pending_or_running(
+                    self.run_store.state
+                )
+                self.run_store.state = self.check_flow_reached_start_time(
+                    self.run_store.state
+                )
+                self.run_store.state = self.set_flow_to_running(self.run_store.state)
+                self.run_store.state = self.get_flow_run_state(
                     return_tasks=return_tasks,
                     task_runner_state_handlers=task_runner_state_handlers,
                     executor=executor,
@@ -278,7 +167,7 @@ class FlowRunner(Runner):
 
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_flow_reached_start_time(self, state: State) -> State:
         """
         Checks if the Flow is in a Scheduled state and, if it is, ensures that the scheduled
@@ -297,13 +186,13 @@ class FlowRunner(Runner):
             if state.start_time and state.start_time > pendulum.now("utc"):
                 self.logger.debug(
                     "Flow '{name}': start_time has not been reached; ending run.".format(
-                        name=self.flow.name
+                        name=self.run_store.flow.name
                     )
                 )
                 raise ENDRUN(state)
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_flow_is_pending_or_running(self, state: State) -> State:
         """
         Checks if the flow is in either a Pending state or Running state. Either are valid
@@ -331,7 +220,7 @@ class FlowRunner(Runner):
 
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def set_flow_to_running(self, state: State) -> State:
         """
         Puts Pending flows in a Running state; leaves Running flows Running.
@@ -354,12 +243,9 @@ class FlowRunner(Runner):
             raise ENDRUN(state)
 
     @run_with_heartbeat
-    @call_state_handlers
+    @Runner.call_state_handlers
     def get_flow_run_state(
         self,
-        state: State,
-        task_states: Dict[Task, State],
-        task_contexts: Dict[Task, Dict[str, Any]],
         return_tasks: Set[Task],
         task_runner_state_handlers: Iterable[Callable],
         executor: "prefect.engine.executors.base.Executor",
@@ -386,26 +272,28 @@ class FlowRunner(Runner):
 
         """
 
-        if not state.is_running():
+        if not self.run_store.state.is_running():
             self.logger.info("Flow is not in a Running state.")
-            raise ENDRUN(state)
+            raise ENDRUN(self.run_store.state)
 
         if return_tasks is None:
             return_tasks = set()
-        if set(return_tasks).difference(self.flow.tasks):
+        if set(return_tasks).difference(self.run_store.flow.tasks):
             raise ValueError("Some tasks in return_tasks were not found in the flow.")
 
         # -- process each task in order
 
         with executor.start():
 
-            for task in self.flow.sorted_tasks():
+            for task in self.run_store.flow.sorted_tasks():
 
-                task_state = task_states.get(task)
+                task_state = self.run_store.task_states.get(task)
                 if task_state is None and isinstance(
                     task, prefect.tasks.core.constants.Constant
                 ):
-                    task_states[task] = task_state = Success(result=task.value)
+                    self.run_store.task_states[task] = task_state = Success(
+                        result=task.value
+                    )
 
                 # if the state is finished, don't run the task, just use the provided state
                 if (
@@ -419,13 +307,13 @@ class FlowRunner(Runner):
                 upstream_states = {}  # type: Dict[Edge, Union[State, Iterable]]
 
                 # -- process each edge to the task
-                for edge in self.flow.edges_to(task):
-                    upstream_states[edge] = task_states.get(
+                for edge in self.run_store.flow.edges_to(task):
+                    upstream_states[edge] = self.run_store.task_states.get(
                         edge.upstream_task, Pending(message="Task state not available.")
                     )
 
                 # augment edges with upstream constants
-                for key, val in self.flow.constants[task].items():
+                for key, val in self.run_store.flow.constants[task].items():
                     edge = Edge(
                         upstream_task=prefect.tasks.core.constants.Constant(val),
                         downstream_task=task,
@@ -439,12 +327,15 @@ class FlowRunner(Runner):
                 # -- run the task
 
                 with prefect.context(task_full_name=task.name, task_tags=task.tags):
-                    task_states[task] = executor.submit(
+                    self.run_store.task_states[task] = executor.submit(
                         self.run_task,
                         task=task,
                         state=task_state,
                         upstream_states=upstream_states,
-                        context=dict(prefect.context, **task_contexts.get(task, {})),
+                        context=dict(
+                            prefect.context,
+                            **self.run_store.task_contexts.get(task, {})
+                        ),
                         task_runner_state_handlers=task_runner_state_handlers,
                         executor=executor,
                     )
@@ -454,16 +345,18 @@ class FlowRunner(Runner):
             # ---------------------------------------------
 
             # terminal tasks determine if the flow is finished
-            terminal_tasks = self.flow.terminal_tasks()
+            terminal_tasks = self.run_store.flow.terminal_tasks()
 
             # reference tasks determine flow state
-            reference_tasks = self.flow.reference_tasks()
+            reference_tasks = self.run_store.flow.reference_tasks()
 
             # wait until all terminal tasks are finished
             final_tasks = terminal_tasks.union(reference_tasks).union(return_tasks)
             final_states = executor.wait(
                 {
-                    t: task_states.get(t, Pending("Task not evaluated by FlowRunner."))
+                    t: self.run_store.task_states.get(
+                        t, Pending("Task not evaluated by FlowRunner.")
+                    )
                     for t in final_tasks
                 }
             )
@@ -485,14 +378,14 @@ class FlowRunner(Runner):
         )
         return_states = {t: final_states[t] for t in return_tasks}
 
-        state = self.determine_final_state(
-            state=state,
+        self.run_store.state = self.determine_final_state(
+            state=self.run_store.state,
             key_states=key_states,
             return_states=return_states,
             terminal_states=terminal_states,
         )
 
-        return state
+        return self.run_store.state
 
     def determine_final_state(
         self,
@@ -568,7 +461,7 @@ class FlowRunner(Runner):
 
         """
         with prefect.context(self.context):
-            default_handler = task.result_handler or self.flow.result_handler
+            default_handler = task.result_handler or self.run_store.flow.result_handler
             task_runner = self.task_runner_cls(
                 task=task,
                 state_handlers=task_runner_state_handlers,

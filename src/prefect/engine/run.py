@@ -10,16 +10,9 @@ from prefect.utilities import logging
 
 class Run:
     def __init__(
-        self,
-        state: Optional[State],
-        context: Dict[str, Any],
-        state_handlers: Iterable[Callable] = None,
+        self, state: Optional[State], context: Dict[str, Any],
     ):
-        if state_handlers is not None and not isinstance(
-            state_handlers, collections.Sequence
-        ):
-            raise TypeError("state_handlers should be iterable.")
-        self.state_handlers = state_handlers or []
+
         self.logger = logging.get_logger(type(self).__name__)
 
         # extract possibly nested meta states -> for example a Submitted( Queued( Retry ) )
@@ -29,5 +22,9 @@ class Run:
         self.state = state or Pending()
         self.context = dict(context or {})
 
+    def handlers(self, runner: "Runner"):
+        return []
+
     def __repr__(self) -> str:
+        # TODO: opportunity to add more useful info here
         return '<"Run">'
