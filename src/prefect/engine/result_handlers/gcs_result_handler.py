@@ -25,12 +25,20 @@ class GCSResultHandler(ResultHandler):
 
     Args:
         - bucket (str): the name of the bucket to write to / read from
+        - uri_suffix (str, optional): the tailing string for the URI. If not
+            provided, this will default to `prefect_result`
         - credentials_secret (str, optional): the name of the Prefect Secret
             which stores a JSON representation of your Google Cloud credentials.
     """
 
-    def __init__(self, bucket: str = None, credentials_secret: str = None,) -> None:
+    def __init__(
+        self,
+        bucket: str = None,
+        uri_suffix: str = None,
+        credentials_secret: str = None,
+    ) -> None:
         self.bucket = bucket
+        self.uri_suffix = uri_suffix or "prefect_result"
         self.credentials_secret = credentials_secret
         super().__init__()
 
@@ -78,7 +86,9 @@ class GCSResultHandler(ResultHandler):
             - str: the GCS URI
         """
         date = pendulum.now("utc").format("Y/M/D")
-        uri = "{date}/{uuid}.prefect_result".format(date=date, uuid=uuid.uuid4())
+        uri = "{date}/{uuid}.{uri_suffix}".format(
+            date=date, uuid=uuid.uuid4(), uri_suffix=self.uri_suffix
+        )
         self.logger.debug("Starting to upload result to {}...".format(uri))
         binary_data = base64.b64encode(cloudpickle.dumps(result)).decode()
         self.gcs_bucket.blob(uri).upload_from_string(binary_data)

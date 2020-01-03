@@ -25,6 +25,8 @@ class S3ResultHandler(ResultHandler):
 
     Args:
         - bucket (str): the name of the bucket to write to / read from
+        - uri_suffix (str, optional): the tailing string for the URI. If not
+            provided, this will default to `prefect_result`
         - aws_credentials_secret (str, optional): the name of the Prefect Secret
             that stores your AWS credentials; this Secret must be a JSON string
             with two keys: `ACCESS_KEY` and `SECRET_ACCESS_KEY` which will be
@@ -32,8 +34,11 @@ class S3ResultHandler(ResultHandler):
             will fall back on standard AWS rules for authentication.
     """
 
-    def __init__(self, bucket: str, aws_credentials_secret: str = None) -> None:
+    def __init__(
+        self, bucket: str, uri_suffix: str = None, aws_credentials_secret: str = None
+    ) -> None:
         self.bucket = bucket
+        self.uri_suffix = uri_suffix or "prefect_result"
         self.aws_credentials_secret = aws_credentials_secret
         super().__init__()
 
@@ -92,7 +97,9 @@ class S3ResultHandler(ResultHandler):
             - str: the S3 URI
         """
         date = pendulum.now("utc").format("Y/M/D")
-        uri = "{date}/{uuid}.prefect_result".format(date=date, uuid=uuid.uuid4())
+        uri = "{date}/{uuid}.{uri_suffix}".format(
+            date=date, uuid=uuid.uuid4(), uri_suffix=self.uri_suffix
+        )
         self.logger.debug("Starting to upload result to {}...".format(uri))
 
         ## prepare data

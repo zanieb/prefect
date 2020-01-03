@@ -29,6 +29,8 @@ class AzureResultHandler(ResultHandler):
         - connection_string (str, optional): an Azure connection string for communicating with
             Blob storage. If not provided the value set in the environment as `AZURE_STORAGE_CONNECTION_STRING`
             will be used
+        - uri_suffix (str, optional): the tailing string for the URI. If not
+            provided, this will default to `prefect_result`        
         - azure_credentials_secret (str, optional): the name of a Prefect Secret
             which stores your Azure credentials; this Secret must be a JSON payload
             with two keys: `ACCOUNT_NAME` and either `ACCOUNT_KEY` or `SAS_TOKEN`
@@ -39,12 +41,14 @@ class AzureResultHandler(ResultHandler):
         self,
         container: str,
         connection_string: str = None,
+        uri_suffix: str = None,
         azure_credentials_secret: str = "AZ_CREDENTIALS",
     ) -> None:
         self.container = container
         self.connection_string = connection_string or os.getenv(
             "AZURE_STORAGE_CONNECTION_STRING"
         )
+        self.uri_suffix = uri_suffix or "prefect_result"
         self.azure_credentials_secret = azure_credentials_secret
         super().__init__()
 
@@ -100,7 +104,9 @@ class AzureResultHandler(ResultHandler):
             - str: the Blob URI
         """
         date = pendulum.now("utc").format("Y/M/D")
-        uri = "{date}/{uuid}.prefect_result".format(date=date, uuid=uuid.uuid4())
+        uri = "{date}/{uuid}.{uri_suffix}".format(
+            date=date, uuid=uuid.uuid4(), uri_suffix=self.uri_suffix
+        )
         self.logger.debug("Starting to upload result to {}...".format(uri))
 
         ## prepare data

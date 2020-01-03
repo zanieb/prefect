@@ -131,6 +131,17 @@ class TestGCSResultHandler:
         )
         assert bucket.blob.call_args[0][0].endswith("prefect_result")
 
+    def test_gcs_write_respects_custom_suffix_if_provided(self, google_client):
+        bucket = MagicMock()
+        google_client.return_value.bucket = MagicMock(return_value=bucket)
+        handler = GCSResultHandler(bucket="foo", uri_suffix="bar")
+        handler.write("so-much-data")
+        assert bucket.blob.called
+        assert bucket.blob.call_args[0][0].startswith(
+            pendulum.now("utc").format("Y/M/D")
+        )
+        assert bucket.blob.call_args[0][0].endswith("bar")
+
     def test_gcs_uses_custom_secret_name(self, google_client):
         handler = GCSResultHandler(bucket="foo", credentials_secret="TEST_SECRET")
 
@@ -208,18 +219,22 @@ class TestS3ResultHandler:
 
     def test_s3_writes_to_blob_prefixed_by_date_suffixed_by_prefect(self, s3_client):
         handler = S3ResultHandler(bucket="foo")
-
-        with prefect.context(
-            secrets=dict(AWS_CREDENTIALS=dict(ACCESS_KEY=1, SECRET_ACCESS_KEY=42))
-        ):
-            with set_temporary_config({"cloud.use_local_secrets": True}):
-                uri = handler.write("so-much-data")
+        uri = handler.write("so-much-data")
 
         used_uri = s3_client.return_value.upload_fileobj.call_args[1]["Key"]
 
         assert used_uri == uri
         assert used_uri.startswith(pendulum.now("utc").format("Y/M/D"))
         assert used_uri.endswith("prefect_result")
+
+    def test_s3_write_respects_custom_suffix_if_provided(self, s3_client):
+        handler = S3ResultHandler(bucket="foo", uri_suffix="bar")
+        uri = handler.write("so-much-data")
+
+        used_uri = s3_client.return_value.upload_fileobj.call_args[1]["Key"]
+        assert used_uri == uri
+        assert used_uri.startswith(pendulum.now("utc").format("Y/M/D"))
+        assert used_uri.endswith("bar")
 
     def test_s3_handler_is_pickleable(self, monkeypatch):
         class client:
@@ -320,6 +335,21 @@ class TestAzureResultHandler:
         assert used_uri == uri
         assert used_uri.startswith(pendulum.now("utc").format("Y/M/D"))
         assert used_uri.endswith("prefect_result")
+
+    def test_azure_write_respects_custom_suffix_if_provided(self, azure_service):
+        handler = AzureResultHandler(container="foo", uri_suffix="bar")
+        with prefect.context(
+            secrets=dict(AZ_CREDENTIALS=dict(ACCOUNT_NAME=1, ACCOUNT_KEY=42))
+        ):
+            with set_temporary_config({"cloud.use_local_secrets": True}):
+                uri = handler.write("so-much-data")
+
+        used_uri = azure_service.return_value.create_blob_from_text.call_args[1][
+            "blob_name"
+        ]
+        assert used_uri == uri
+        assert used_uri.startswith(pendulum.now("utc").format("Y/M/D"))
+        assert used_uri.endswith("bar")
 
     def test_azure_service_handler_is_pickleable(self):
         class service:
