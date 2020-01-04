@@ -91,11 +91,7 @@ class TaskRunner(Runner):
     ):
         self.context = prefect.context.to_dict()
         self.task = task
-        self.result_handler = (
-            task.result_handler
-            or result_handler
-            or prefect.engine.get_default_result_handler_class()()
-        )
+        self.result_handler = task.result_handler or result_handler
         super().__init__(state_handlers=state_handlers)
 
     def __repr__(self) -> str:
@@ -697,7 +693,7 @@ class TaskRunner(Runner):
 
                 for edge, upstream_state in upstream_states.items():
 
-                    # if the edge is not mapped over, then we simply take its state
+                    # if the edge is not mapped over, then we take its state
                     if not edge.mapped:
                         states[edge] = upstream_state
 
@@ -722,7 +718,7 @@ class TaskRunner(Runner):
                         # in the `cached_inputs` attribute of one of the child states).
                         # Therefore, we only try to get a result if EITHER this task's
                         # state is not already mapped OR the upstream result is not None.
-                        if not state.is_mapped() or upstream_state.result != NoResult:
+                        if not state.is_mapped() or upstream_state._result != NoResult:
                             upstream_result = Result(
                                 upstream_state.result[i],
                                 result_handler=upstream_state._result.result_handler,  # type: ignore

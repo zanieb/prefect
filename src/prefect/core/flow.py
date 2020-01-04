@@ -162,9 +162,7 @@ class Flow:
         self.schedule = schedule
         self.environment = environment or prefect.environments.RemoteEnvironment()
         self.storage = storage
-        self.result_handler = (
-            result_handler or prefect.engine.get_default_result_handler_class()()
-        )
+        self.result_handler = result_handler or getattr(storage, "result_handler", None)
 
         self.tasks = set()  # type: Set[Task]
         self.edges = set()  # type: Set[Edge]
@@ -956,7 +954,7 @@ class Flow:
 
         Args:
             - parameters (Dict[str, Any], optional): values to pass into the runner
-            - run_on_schedule (bool, optional): whether to run this flow on its schedule, or simply run a single execution;
+            - run_on_schedule (bool, optional): whether to run this flow on its schedule, or run a single execution;
                 if not provided, will default to the value set in your user config
             - runner_cls (type): an optional FlowRunner class (will use the default if not provided)
             - **kwargs: additional keyword arguments; if any provided keywords
@@ -1026,7 +1024,7 @@ class Flow:
 
         # state always should return a dict of tasks. If it's NoResult (meaning the run was
         # interrupted before any tasks were executed), we set the dict manually.
-        if state.result == NoResult:
+        if state._result == NoResult:
             state.result = {}
         elif isinstance(state.result, Exception):
             self.logger.error(
@@ -1104,9 +1102,7 @@ class Flow:
                             str(id(t)) + str(map_index), name, shape=shape, **kwargs
                         )
                 else:
-                    kwargs = dict(
-                        color=get_color(t), style="filled", colorscheme="svg",
-                    )
+                    kwargs = dict(color=get_color(t), style="filled", colorscheme="svg")
                     graph.node(str(id(t)), name, shape=shape, **kwargs)
             else:
                 kwargs = (
@@ -1184,6 +1180,9 @@ class Flow:
 
         Returns:
             - dict representing the flow
+
+        Raises:
+            - ValueError: if `build=True` and the flow has no storage
         """
 
         self.validate()
@@ -1220,8 +1219,10 @@ class Flow:
                 or the name of the Flow you wish to load
         """
         if not os.path.isabs(fpath):
-            path = "{home}/flows".format(home=prefect.context.config.home_dir)
-            fpath = Path(os.path.expanduser(path)) / "{}.prefect".format(slugify(fpath))  # type: ignore
+            path = "{home}/flows".format(home=prefect.context.config.home_dir)  # type: ignore
+            fpath = Path(os.path.expanduser(path)) / "{}.prefect".format(  # type: ignore
+                slugify(fpath)
+            )  # type: ignore
         with open(str(fpath), "rb") as f:
             return cloudpickle.load(f)
 
@@ -1238,8 +1239,10 @@ class Flow:
             - str: the full location the Flow was saved to
         """
         if fpath is None:
-            path = "{home}/flows".format(home=prefect.context.config.home_dir)
-            fpath = Path(os.path.expanduser(path)) / "{}.prefect".format(  # type: ignore
+            path = "{home}/flows".format(home=prefect.context.config.home_dir)  # type: ignore
+            fpath = Path(  # type: ignore
+                os.path.expanduser(path)  # type: ignore
+            ) / "{}.prefect".format(  # type: ignore
                 slugify(self.name)
             )
             assert fpath is not None  # mypy assert
@@ -1360,6 +1363,10 @@ class Flow:
 
         if labels:
             self.environment.labels.update(labels)
+
+        # register the flow with a default result handler if one not provided
+        if not self.result_handler:
+            self.result_handler = self.storage.result_handler
 
         client = prefect.Client()
         registered_flow = client.register(

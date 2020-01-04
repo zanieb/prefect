@@ -12,7 +12,7 @@ itself -- may not available when the Environment class is instantiated. Therefor
 are accompanied with a Storage objects to specify how and where the flow is stored. For example,
 the `DaskKubernetesEnvironment` requires the flow to be stored in a `Docker` storage object.
 """
-
+import threading
 from typing import Any, Callable, Iterable
 
 import prefect
@@ -56,7 +56,7 @@ class Environment:
     def dependencies(self) -> list:
         return []
 
-    def setup(self, storage: "Storage") -> None:
+    def setup(self, storage: "Storage", cancel_event: "threading.Event" = None) -> None:
         """
         Sets up any infrastructure needed for this environment
 

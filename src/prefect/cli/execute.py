@@ -91,7 +91,7 @@ class MonitoredCloudFlowRunner:
         # start a state listener thread, pulling states for this flow run id from cloud.
         # Events are reported back to the main thread (here). Why a separate thread?
         # Among other reasons, when we start doing subscriptions later, it will continue
-        # to work with no modifications
+        # to work with little modification (replacing the periodic caller with a thread)
         self.state_thread = PeriodicMonitoredCall(
             interval=10,
             function=self.stream_flow_run_state_events,
@@ -102,9 +102,11 @@ class MonitoredCloudFlowRunner:
             name_prefix="PrefectFlowRunState-{}".format(flow_run_id)
         )
 
+        cancel_event = threading.Event()
+
         def controlled_run():
             try:
-                self.execute_flow_run(flow_run_id)
+                self.execute_flow_run(flow_run_id, cancel_event)
             except Exception:
                 self.logger.exception("Error occured on run")
 
@@ -140,7 +142,7 @@ class MonitoredCloudFlowRunner:
         self._on_exit()
         return self.successful
 
-    def execute_flow_run(self, flow_run_id) -> bool:
+    def execute_flow_run(self, flow_run_id, cancel_event) -> bool:
         query = {
             "query": {
                 with_args("flow_run", {"where": {"id": {"_eq": flow_run_id}}}): {
@@ -163,8 +165,7 @@ class MonitoredCloudFlowRunner:
 
             flow = storage.get_flow(storage.flows[flow_run.flow.name])
             environment = flow.environment
-
-            environment.setup(storage=storage)
+            environment.setup(storage=storage, cancel_event=cancel_event)
             environment.execute(
                 storage=storage, flow_location=storage.flows[flow_run.flow.name]
             )

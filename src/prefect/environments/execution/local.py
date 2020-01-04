@@ -1,4 +1,5 @@
 import os
+import threading
 from typing import Any, Callable, List
 
 from prefect.environments.execution.base import Environment
@@ -30,6 +31,9 @@ class LocalEnvironment(Environment):
     @property
     def dependencies(self) -> list:
         return []
+
+    def setup(self, cancel_event: "threading.Event" = None):
+        self.cancel_event = cancel_event
 
     def execute(self, storage: "Storage", flow_location: str, **kwargs: Any) -> None:
         """
