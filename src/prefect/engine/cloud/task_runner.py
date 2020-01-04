@@ -14,7 +14,7 @@ from prefect.utilities.executors import tail_recursive
 from prefect.engine.cloud.utilities import prepare_state_for_cloud
 from prefect.engine.result import NoResult, Result
 from prefect.engine.result_handlers import ResultHandler
-from prefect.engine.runner import ENDRUN, call_state_handlers
+from prefect.engine.runner import ENDRUN
 from prefect.engine.state import (
     Cached,
     ClientFailed,
@@ -188,7 +188,7 @@ class CloudTaskRunner(TaskRunner):
 
         return super().initialize_run(state=state, context=context)
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_task_is_cached(self, state: State, inputs: Dict[str, Result]) -> State:
         """
         Checks if task is cached in the DB and whether any of the caches are still valid.

@@ -10,7 +10,6 @@ from typing import (
     Dict,
     Iterable,
     List,
-    NamedTuple,
     Optional,
     Set,
     Sized,
@@ -26,7 +25,7 @@ from prefect.core import Edge, Task
 from prefect.engine import signals
 from prefect.engine.result import NoResult, Result
 from prefect.engine.result_handlers import JSONResultHandler, ResultHandler
-from prefect.engine.runner import ENDRUN, Runner, call_state_handlers
+from prefect.engine.runner import ENDRUN, Runner
 from prefect.engine.state import (
     Cached,
     Cancelled,
@@ -54,11 +53,6 @@ from prefect.utilities.executors import (
 
 if TYPE_CHECKING:
     from prefect.engine.result_handlers import ResultHandler
-
-
-TaskRunnerInitializeResult = NamedTuple(
-    "TaskRunnerInitializeResult", [("state", State), ("context", Dict[str, Any])]
-)
 
 
 class TaskRunner(Runner):
@@ -120,62 +114,6 @@ class TaskRunner(Runner):
             new_state = handler(self.task, old_state, new_state) or new_state
 
         return new_state
-
-    def initialize_run(  # type: ignore
-        self, state: Optional[State], context: Dict[str, Any]
-    ) -> TaskRunnerInitializeResult:
-        """
-        Initializes the Task run by initializing state and context appropriately.
-
-        If the task is being retried, then we retrieve the run count from the initial Retry
-        state. Otherwise, we assume the run count is 1. The run count is stored in context as
-        task_run_count.
-
-        Also, if the task is being resumed through a `Resume` state, updates context to have `resume=True`.
-
-        Args:
-            - state (Optional[State]): the initial state of the run
-            - context (Dict[str, Any]): the context to be updated with relevant information
-
-        Returns:
-            - tuple: a tuple of the updated state, context, upstream_states, and inputs objects
-        """
-        state, context = super().initialize_run(state=state, context=context)
-
-        if isinstance(state, Retrying):
-            run_count = state.run_count + 1
-        else:
-            run_count = state.context.get("task_run_count", 1)
-
-        if isinstance(state, Resume):
-            context.update(resume=True)
-
-        if hasattr(state, "cached_inputs"):
-            if "_loop_count" in (state.cached_inputs or {}):  # type: ignore
-                loop_context = {
-                    "task_loop_count": state.cached_inputs.pop(  # type: ignore
-                        "_loop_count"
-                    )  # type: ignore
-                    .to_result()
-                    .value,
-                    "task_loop_result": state.cached_inputs.pop(  # type: ignore
-                        "_loop_result"
-                    )  # type: ignore
-                    .to_result()
-                    .value,
-                }
-                context.update(loop_context)
-
-        context.update(
-            task_run_count=run_count,
-            task_name=self.task.name,
-            task_tags=self.task.tags,
-            task_slug=self.task.slug,
-        )
-        context.setdefault("checkpointing", config.flows.checkpointing)
-        context.update(logger=self.task.logger)
-
-        return TaskRunnerInitializeResult(state=state, context=context)
 
     @tail_recursive
     def run(
@@ -338,7 +276,7 @@ class TaskRunner(Runner):
 
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_upstream_finished(
         self, state: State, upstream_states: Dict[Edge, State]
     ) -> State:
@@ -374,7 +312,7 @@ class TaskRunner(Runner):
             raise ENDRUN(state)
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_upstream_skipped(
         self, state: State, upstream_states: Dict[Edge, State]
     ) -> State:
@@ -417,7 +355,7 @@ class TaskRunner(Runner):
             )
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_task_trigger(
         self, state: State, upstream_states: Dict[Edge, State]
     ) -> State:
@@ -479,7 +417,7 @@ class TaskRunner(Runner):
 
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_task_is_ready(self, state: State) -> State:
         """
         Checks to make sure the task is ready to run (Pending or Mapped).
@@ -539,7 +477,7 @@ class TaskRunner(Runner):
             )
             raise ENDRUN(state)
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_task_reached_start_time(self, state: State) -> State:
         """
         Checks if a task is in a Scheduled state and, if it is, ensures that the scheduled
@@ -605,7 +543,7 @@ class TaskRunner(Runner):
             )
         return task_inputs
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_task_is_cached(self, state: State, inputs: Dict[str, Result]) -> State:
         """
         Checks if task is cached and whether the cache is still valid.
@@ -777,7 +715,7 @@ class TaskRunner(Runner):
         )
         return self.handle_state_change(old_state=state, new_state=new_state)
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def wait_for_mapped_task(
         self, state: State, executor: "prefect.engine.executors.Executor"
     ) -> State:
@@ -796,7 +734,7 @@ class TaskRunner(Runner):
             state.map_states = executor.wait(state.map_states)
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def set_task_to_running(self, state: State) -> State:
         """
         Sets the task to running
@@ -823,7 +761,7 @@ class TaskRunner(Runner):
         return new_state
 
     @run_with_heartbeat
-    @call_state_handlers
+    @Runner.call_state_handlers
     def get_task_run_state(
         self,
         state: State,
@@ -911,7 +849,7 @@ class TaskRunner(Runner):
 
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def cache_result(self, state: State, inputs: Dict[str, Result]) -> State:
         """
         Caches the result of a successful task, if appropriate. Alternatively,
@@ -951,7 +889,7 @@ class TaskRunner(Runner):
 
         return state
 
-    @call_state_handlers
+    @Runner.call_state_handlers
     def check_for_retry(self, state: State, inputs: Dict[str, Result]) -> State:
         """
         Checks to see if a FAILED task should be retried.
