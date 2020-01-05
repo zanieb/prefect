@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 StateList = Union["State", List["State"]]
 
 
-class Heartbeat:
+class PeriodicMonitoredCall:
     """
     Class for calling a function on an interval in a background thread.
 
@@ -36,12 +36,14 @@ class Heartbeat:
             to not require arguments
     """
 
-    def __init__(self, interval: int, function: Callable, logger: Logger) -> None:
+    def __init__(
+        self, interval: int, function: Callable, logger: Logger, **kwargs
+    ) -> None:
         self.interval = interval
-        self.rate = min(interval, 1)
         self.function = function
         self.logger = logger
-        self._exit = False
+        self._exit = threading.Event()
+        self.kwargs = kwargs
 
     def start(self, name_prefix: str = "") -> None:
         """
@@ -49,30 +51,21 @@ class Heartbeat:
         """
 
         def looper(ctx: dict) -> None:
-            iters = 0
-
-            ## we use the self._exit attribute as a way of communicating
-            ## that the loop should cease; because we want to respond to this
-            ## "exit signal" quickly, we loop every `rate` seconds and check
-            ## whether we should exit.  Every `interval` number of calls, we
-            ## actually call the function.  The rounding logic is here to
-            ## support sub-second intervals.
             with prefect.context(ctx):
-                while not self._exit:
-                    if round(iters % self.interval) == 0:
-                        self.function()
-                    iters = (iters + 1) % self.interval
-                    time.sleep(self.rate)
+                while not self._exit.wait(self.interval):
+                    try:
+                        self.function(**self.kwargs)
+                    except Exception as exc:
+                        self.logger.exception("Heartbeat function threw an exception")
 
         def monitor(ctx: dict) -> None:
             with prefect.context(ctx):
-                while not self._exit:
+                while not self._exit.wait(self.interval / 2):
                     if not self.fut.running():
                         self.logger.warning(
-                            "Heartbeat thread appears to have died.  This could result in a zombie run."
+                            "Watchdog thread noticed Heartbeat thread has died."
                         )
                         return
-                    time.sleep(self.rate / 2)
 
         kwargs = dict(max_workers=2)  # type: Dict[str, Any]
         if sys.version_info.minor != 5:
@@ -98,7 +91,7 @@ class Heartbeat:
             # the future is actually submitted to the executor
             if hasattr(self, "fut"):
                 running = self.fut.running()
-            self._exit = True
+            self._exit.set()
             self.executor.shutdown()
         return running
 
@@ -115,25 +108,23 @@ def run_with_heartbeat(
     def inner(
         self: "prefect.engine.runner.Runner", *args: Any, **kwargs: Any
     ) -> "prefect.engine.state.State":
-        timer = Heartbeat(
-            prefect.config.cloud.heartbeat_interval, self._heartbeat, self.logger
+
+        timer = PeriodicMonitoredCall(
+            interval=prefect.config.cloud.heartbeat_interval,
+            function=self._heartbeat,
+            logger=self.logger,
         )
         obj = getattr(self, "task", None) or getattr(self, "flow", None)
         thread_name = "PrefectHeartbeat-{}".format(getattr(obj, "name", "unknown"))
+
         try:
-            try:
-                if self._heartbeat():
-                    timer.start(name_prefix=thread_name)
-            except Exception as exc:
-                self.logger.exception(
-                    "Heartbeat failed to start.  This could result in a zombie run."
-                )
+            timer.start(name_prefix=thread_name)
             return runner_method(self, *args, **kwargs)
         finally:
             was_running = timer.cancel()
             if not was_running:
                 self.logger.warning(
-                    "Heartbeat thread appears to have died.  This could result in a zombie run."
+                    "Heartbeat thread already stopped before cancellation."
                 )
 
     return inner
@@ -301,7 +292,8 @@ def tail_recursive(func: Callable) -> Callable:
 
     This allows for recursion with unlimited depth since a stack is not allocated for
     each "nested" call. Note: instead of calling the target function in question, a 
-    `RecursiveCall` exception must be raised instead. 
+    `RecursiveCall` exception must be raised instead with the necessary parameters to
+    be invoked by this `tail_recursive` decorator. 
 
     Args:
         - fn (callable): the function to execute
@@ -329,8 +321,9 @@ def tail_recursive(func: Callable) -> Callable:
                         )
                     )
 
-                # there may be multiple nested recursive calls, we should only respond to calls for the
-                # wrapped function explicitly, otherwise allow the call to continue to propagate
+                # there may be multiple nested recursive calls originating from multiple different functions.
+                # We should only respond to calls for this wrapped function explicitly, otherwise allow the
+                # call to continue to propagate for other `tail_recursive` decorated functions to catch.
                 if call_func != func:
                     raise exc
                 args = exc.args
