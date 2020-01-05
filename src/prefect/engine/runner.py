@@ -11,75 +11,6 @@ from prefect.utilities import logging
 ENDRUN = signals.ENDRUN
 
 
-def call_state_handlers(method: Callable[..., State]) -> Callable[..., State]:
-    """
-    Decorator that calls the Runner's `handle_state_change()` method.
-
-    If used on a Runner method that has the signature:
-        method(self, state: State, *args, **kwargs) -> State
-    this decorator will inspect the provided State and the returned State and call
-    the Runner's `handle_state_change()` method if they are different.
-
-    For example:
-
-    ```python
-    @call_state_handlers
-    def check_if_task_is_pending(self, state: State):
-        if not state.is_pending()
-            return Failed()
-        return state
-    ```
-
-    Args:
-        - method (Callable): a Runner method with the signature:
-            method(self, state: State, *args, **kwargs) -> State
-
-    Returns:
-        Callable: a decorated method that calls Runner.handle_state_change() if the
-            state it returns is different than the state it was passed.
-    """
-
-    @functools.wraps(method)
-    def inner(self: "Runner", state: State, *args: Any, **kwargs: Any) -> State:
-        raise_end_run = False
-        raise_on_exception = prefect.context.get("raise_on_exception", False)
-
-        try:
-            new_state = method(self, state, *args, **kwargs)
-        except ENDRUN as exc:
-            raise_end_run = True
-            new_state = exc.state
-
-        # PrefectStateSignals are trapped and turned into States
-        except signals.PrefectStateSignal as exc:
-            self.logger.debug(
-                "{name} signal raised: {rep}".format(
-                    name=type(exc).__name__, rep=repr(exc)
-                )
-            )
-            if raise_on_exception:
-                raise exc
-            new_state = exc.state
-
-        except Exception as exc:
-            formatted = "Unexpected error: {}".format(repr(exc))
-            self.logger.exception(formatted)
-            if raise_on_exception:
-                raise exc
-            new_state = Failed(formatted, result=exc)
-
-        if new_state is not state:
-            new_state = self.handle_state_change(old_state=state, new_state=new_state)
-
-        # if an ENDRUN was raised, reraise so it can be trapped
-        if raise_end_run:
-            raise ENDRUN(new_state)
-
-        return new_state
-
-    return inner
-
-
 class Runner:
     def __init__(self, state_handlers: Iterable[Callable] = None):
         if state_handlers is not None and not isinstance(
@@ -95,22 +26,10 @@ class Runner:
     def _heartbeat(self) -> bool:
         return False
 
+    # TODO: delete when task runner is not using this anymore
     def initialize_run(
         self, state: Optional[State], context: Dict[str, Any]
     ) -> Tuple[State, Dict[str, Any]]:
-        """
-        Initializes the Task run by initializing state and context appropriately.
-
-        If the provided state is a meta state, the state it wraps is extracted.
-
-        Args:
-            - state (Optional[State]): the initial state of the run
-            - context (dict): the context to be updated with relevant information
-
-        Returns:
-            - tuple: a tuple of the updated state and context objects
-        """
-
         # extract possibly nested meta states -> for example a Submitted( Queued( Retry ) )
         while isinstance(state, State) and state.is_meta_state():
             state = state.state  # type: ignore
@@ -119,20 +38,8 @@ class Runner:
 
         return state, context
 
+    # TODO: delete when task runner is not using this anymore
     def call_runner_target_handlers(self, old_state: State, new_state: State) -> State:
-        """
-        Runners are used to execute a target object, usually a `Task` or a `Flow`, and those
-        objects may have state handlers of their own. This method will always be called as
-        the Runner's first state handler, and provides an entrypoint that can be overriden
-        to target either a Task or Flow's own handlers.
-
-        Args:
-            - old_state (State): the old (previous) state
-            - new_state (State): the new (current) state
-
-        Returns:
-            State: the new state
-        """
         return new_state
 
     def handle_state_change(self, old_state: State, new_state: State) -> State:
@@ -182,3 +89,69 @@ class Runner:
             self.logger.exception(msg)
             raise ENDRUN(Failed(msg, result=exc))
         return new_state
+
+    @classmethod
+    def call_state_handlers(cls, method: Callable[..., State]) -> Callable[..., State]:
+        """
+        Decorator that calls the Runner's `handle_state_change()` method.
+        If used on a Runner method that has the signature:
+            method(self, state: State, *args, **kwargs) -> State
+        this decorator will inspect the provided State and the returned State and call
+        the Runner's `handle_state_change()` method if they are different.
+        For example:
+        ```python
+        @Runner.call_state_handlers
+        def check_if_task_is_pending(self, state: State):
+            if not state.is_pending()
+                return Failed()
+            return state
+        ```
+        Args:
+            - method (Callable): a Runner method with the signature:
+                method(self, state: State, *args, **kwargs) -> State
+        Returns:
+            Callable: a decorated method that calls Runner.handle_state_change() if the
+                state it returns is different than the state it was passed.
+        """
+
+        @functools.wraps(method)
+        def inner(self: "Runner", state: State, *args: Any, **kwargs: Any) -> State:
+            raise_end_run = False
+            raise_on_exception = prefect.context.get("raise_on_exception", False)
+
+            try:
+                new_state = method(self, state, *args, **kwargs)
+            except ENDRUN as exc:
+                raise_end_run = True
+                new_state = exc.state
+
+            # PrefectStateSignals are trapped and turned into States
+            except signals.PrefectStateSignal as exc:
+                self.logger.debug(
+                    "{name} signal raised: {rep}".format(
+                        name=type(exc).__name__, rep=repr(exc)
+                    )
+                )
+                if raise_on_exception:
+                    raise exc
+                new_state = exc.state
+
+            except Exception as exc:
+                formatted = "Unexpected error: {}".format(repr(exc))
+                self.logger.exception(formatted)
+                if raise_on_exception:
+                    raise exc
+                new_state = Failed(formatted, result=exc)
+
+            if new_state is not state:
+                new_state = self.handle_state_change(
+                    old_state=state, new_state=new_state
+                )
+
+            # if an ENDRUN was raised, reraise so it can be trapped
+            if raise_end_run:
+                raise ENDRUN(new_state)
+
+            return new_state
+
+        return inner
