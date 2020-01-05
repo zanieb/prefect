@@ -10,6 +10,9 @@ class LocalExecutor(Executor):
     the main thread.  To be used mainly for debugging purposes.
     """
 
+    def __init__(self):
+        super().__init__()
+
     def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
         """
         Submit a function to the executor for execution. Returns the result of the computation.
@@ -22,6 +25,9 @@ class LocalExecutor(Executor):
         Returns:
             - Any: the result of `fn(*args, **kwargs)`
         """
+        if not self.accepting_work:
+            raise RuntimeError("Executor is shutdown, no work can be submitted")
+
         return fn(*args, **kwargs)
 
     def map(self, fn: Callable, *args: Any) -> List[Any]:
@@ -36,6 +42,9 @@ class LocalExecutor(Executor):
             - List[Any]: the result of computating the function over the arguments
 
         """
+        if not self.accepting_work:
+            raise RuntimeError("Executor is shutdown, no work can be submitted")
+
         results = []
         for args_i in zip(*args):
             results.append(fn(*args_i))
@@ -52,3 +61,13 @@ class LocalExecutor(Executor):
             - Any: whatever `futures` were provided
         """
         return futures
+
+    def shutdown(self, wait=True) -> List[Any]:
+        """
+        Signal the executor that it should cancel current pending work, prevent future work from 
+        being submitted, and optionally wait for any currently running futures to finish execution.
+        Args:
+            - wait (bool): wait for any pending work to be completed (defaults to True)
+        """
+        super().shutdown(wait=wait)
+        return []

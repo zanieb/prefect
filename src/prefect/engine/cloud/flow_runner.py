@@ -57,6 +57,12 @@ class CloudFlowRunner(FlowRunner):
         state = self.fetch_current_flow_run_state(flow_run_id)
         return state != Cancelled
 
+    # TODO: consider moving this to the base class
+    def cancel(self, wait=True) -> List[Any]:
+        if self.executor:
+            return self.executor.shutdown(wait=wait)
+        raise RuntimeError("Flow is not running, thus cannot be cancelled")
+
     def run(
         self,
         return_tasks: Iterable[Task] = None,
@@ -114,10 +120,7 @@ class CloudFlowRunner(FlowRunner):
                     continue
 
                 if item.event == "state" and item.payload == Cancelled:
-                    # TODO: call cancel to flow executor to prevent scheduiling of future work
-                    # if self.executor:
-                    #     self.executor.cancel()
-
+                    self.cancel()
                     self._request_exit()
                 elif item.event == "exit":
                     break
@@ -129,7 +132,7 @@ class CloudFlowRunner(FlowRunner):
 
         self._on_exit()
         # TODO: return result state
-        return self.successful
+        return  # ...
 
     def fetch_current_flow_run_state(self, flow_run_id):
         query = {
