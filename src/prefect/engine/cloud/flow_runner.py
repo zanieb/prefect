@@ -6,11 +6,11 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import prefect
 from prefect.client import Client
-from prefect.engine.cloud import CloudFlowRun
+from prefect.engine.cloud.flow_run import CloudFlowRun
 from prefect.core import Flow, Task
 from prefect.engine.cloud import CloudTaskRunner
 from prefect.engine.cloud.utilities import prepare_state_for_cloud
-from prefect.engine.flow_runner import FlowRunner, FlowRunnerInitializeResult
+from prefect.engine.flow_runner import FlowRunner
 from prefect.engine.runner import ENDRUN
 from prefect.engine.state import Failed, State, Cancelled
 from prefect.utilities.executors import PeriodicMonitoredCall
@@ -24,16 +24,14 @@ class CloudFlowRunner(FlowRunner):
     Write up that this is the same as the FlowRunner, but monitored...
     """
 
-    def __init__(
-        self, run: CloudFlowRun, state_handlers: Iterable[Callable] = None
-    ) -> None:
+    def __init__(self, run: CloudFlowRun) -> None:
         # TODO: bad: both the runner and run object have a client
         self.client = Client()
         self.state_thread = None
         self.worker_thread = None
         self.queue = queue.Queue()
         self.executor = None
-        super().__init__(run=run, state_handlers=state_handlers)
+        super().__init__(run=run)
 
     def _heartbeat(self) -> bool:
         self.client.update_flow_run_heartbeat(self.run_state.id)
@@ -63,12 +61,7 @@ class CloudFlowRunner(FlowRunner):
             return self.executor.shutdown(wait=wait)
         raise RuntimeError("Flow is not running, thus cannot be cancelled")
 
-    def run(
-        self,
-        return_tasks: Iterable[Task] = None,
-        task_runner_state_handlers: Iterable[Callable] = None,
-        executor: "prefect.engine.executors.Executor" = None,
-    ) -> State:
+    def run(self, executor: "prefect.engine.executors.Executor" = None,) -> State:
         self.logger.debug("Starting")
         if not self.check_valid_initial_state(self.run_state.id):
             raise RuntimeError("Flow run initial state is invalid. It will not be run!")
@@ -94,11 +87,7 @@ class CloudFlowRunner(FlowRunner):
                 self.executor = executor
 
                 # TODO: return state back to main thread
-                state = super().run(
-                    return_tasks=return_tasks,
-                    task_runner_state_handlers=task_runner_state_handlers,
-                    executor=executor,
-                )
+                state = super().run(executor=executor,)
             except Exception:
                 self.logger.exception("Error occured on run")
 

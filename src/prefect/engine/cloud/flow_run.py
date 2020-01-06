@@ -18,10 +18,11 @@ import prefect
 from prefect.client import Client
 from prefect.engine.cloud import CloudTaskRunner
 from prefect.core import Edge, Flow, Task
-from prefect.engine import signals, Run
+from prefect.engine import signals
 from prefect.engine.result import Result
 from prefect.engine.result_handlers import ConstantResultHandler
-from prefect.engine.runner import ENDRUN, Runner, call_state_handlers
+from prefect.engine.runner import ENDRUN, Runner
+from prefect.engine.run import Run
 from prefect.engine.state import (
     Cancelled,
     Failed,
@@ -64,14 +65,14 @@ class CloudFlowRun(FlowRun):
     def __init__(
         self,
         flow: "Flow",
-        state: Optional[State],
-        task_states: Dict[Task, State],
-        context: Dict[str, Any],
-        task_contexts: Dict[Task, Dict[str, Any]],
-        parameters: Dict[str, Any],
+        state: Optional[State] = None,
+        task_states: Dict[Task, State] = None,
+        context: Dict[str, Any] = None,
+        task_contexts: Dict[Task, Dict[str, Any]] = None,
+        parameters: Dict[str, Any] = None,
         task_runner_cls: type = CloudTaskRunner,
-        executor_cls: type = None,
-        id: str = None,
+        id: Optional[str] = None,
+        **kwargs: Any,
     ):
 
         # TODO: bad: both the runner and run object have a client
@@ -128,6 +129,7 @@ class CloudFlowRun(FlowRun):
             task_contexts=task_contexts,
             parameters=updated_parameters,
             id=id,
+            **kwargs,
         )
 
     def flow_state_handlers(self, old_state: State, new_state: State) -> State:

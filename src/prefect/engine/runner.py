@@ -42,6 +42,7 @@ class Runner:
     def call_runner_target_handlers(self, old_state: State, new_state: State) -> State:
         return new_state
 
+    # TODO: modify this to use the state handlers from the run_state object
     def handle_state_change(self, old_state: State, new_state: State) -> State:
         """
         Calls any handlers associated with the Runner
@@ -65,6 +66,7 @@ class Runner:
 
         try:
             # call runner's target handlers
+            # TODO: remove this call, it should just be inserted when needed into a copy of the existing state_handler list (wait for task runner to catch up)
             new_state = self.call_runner_target_handlers(old_state, new_state)
 
             # call runner's own handlers

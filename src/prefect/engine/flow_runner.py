@@ -9,13 +9,14 @@ from typing import (
     Set,
     Tuple,
     Union,
+    TYPE_CHECKING,
 )
 
 import pendulum
 
 import prefect
 from prefect.core import Edge, Flow, Task
-from prefect.engine import signals, FlowRun
+from prefect.engine import signals
 from prefect.engine.result import Result
 from prefect.engine.result_handlers import ConstantResultHandler
 from prefect.engine.runner import ENDRUN, Runner
@@ -34,6 +35,9 @@ from prefect.engine.task_runner import TaskRunner
 from prefect.utilities.collections import flatten_seq
 from prefect.utilities.executors import run_with_heartbeat
 
+if TYPE_CHECKING:
+    from prefect.engine import FlowRun
+
 
 class FlowRunner(Runner):
     """
@@ -45,15 +49,7 @@ class FlowRunner(Runner):
     and what states each task should be initialized with.
 
     Args:
-        - flow (Flow): the `Flow` to be run
-        - state_handlers (Iterable[Callable], optional): A list of state change handlers
-            that will be called whenever the flow changes state, providing an
-            opportunity to inspect or modify the new state. The handler
-            will be passed the flow runner instance, the old (prior) state, and the new
-            (current) state, with the following signature:
-                `state_handler(fr: FlowRunner, old_state: State, new_state: State) -> Optional[State]`
-            If multiple functions are passed, then the `new_state` argument will be the
-            result of the previous handler.
+        - run (FlowRun): a `FlowRun` configuration object that has the flow definition and any existing state
 
     Note: new FlowRunners are initialized within the call to `Flow.run()` and in general,
     this is the endpoint through which FlowRunners will be interacted with most frequently.
@@ -77,13 +73,10 @@ class FlowRunner(Runner):
     ```
     """
 
-    def __init__(
-        self, run: FlowRun, state_handlers: Iterable[Callable] = None,
-    ):
-        super().__init__(state_handlers=state_handlers)
+    def __init__(self, run: "FlowRun"):
+        super().__init__()
         self.context = prefect.context.to_dict()
         self.run_state = run
-        self.run_state.attach(self)
 
     def __repr__(self) -> str:
         return "<{}: {}>".format(type(self).__name__, self.run_state.flow.name)
@@ -92,12 +85,61 @@ class FlowRunner(Runner):
     def call_runner_target_handlers(self, old_state: State, new_state: State) -> State:
         return new_state
 
-    def run(
-        self,
-        return_tasks: Iterable[Task] = None,
-        task_runner_state_handlers: Iterable[Callable] = None,
-        executor: "prefect.engine.executors.Executor" = None,
-    ) -> State:
+    # TODO: this will get moved to the base class when the task runner can support these changes...
+    def handle_state_change(self, old_state: State, new_state: State) -> State:
+        """
+        Calls any handlers associated with the Runner
+
+        This method will only be called when the state changes (`old_state is not new_state`)
+
+        Args:
+            - old_state (State): the old (previous) state of the task
+            - new_state (State): the new (current) state of the task
+
+        Returns:
+            State: the updated state of the task
+
+        Raises:
+            - PAUSE: if raised by a handler
+            - ENDRUN: if raised by a handler
+            - ENDRUN(Failed()): if any of the handlers fail unexpectedly
+
+        """
+        self.logger.debug(
+            "Handling state change from {old} to {new}".format(
+                old=type(old_state).__name__, new=type(new_state).__name__,
+            )
+        )
+
+        raise_on_exception = prefect.context.get("raise_on_exception", False)
+
+        try:
+            # call runner's own handlers
+            for handler in self.run_state.state_handlers:
+                new_state = (
+                    handler(self.run_state.flow, old_state, new_state) or new_state
+                )
+
+        # raise pauses and ENDRUNs
+        except (signals.PAUSE, ENDRUN):
+            raise
+
+        # trap signals
+        except signals.PrefectStateSignal as exc:
+            if raise_on_exception:
+                raise
+            return exc.state
+
+        # abort on errors
+        except Exception as exc:
+            if raise_on_exception:
+                raise
+            msg = "Unexpected error while calling state handlers: {}".format(repr(exc))
+            self.logger.exception(msg)
+            raise ENDRUN(Failed(msg, result=exc))
+        return new_state
+
+    def run(self, executor: "prefect.engine.executors.Executor" = None,) -> State:
         """
         The main endpoint for FlowRunners.  Calling this method will perform all
         computations contained within the Flow and return the final state of the Flow.
@@ -128,12 +170,7 @@ class FlowRunner(Runner):
                 state = self.check_flow_is_pending_or_running(state)
                 state = self.check_flow_reached_start_time(state)
                 state = self.set_flow_to_running(state)
-                state = self.get_flow_run_state(
-                    state,
-                    return_tasks=return_tasks,
-                    task_runner_state_handlers=task_runner_state_handlers,
-                    executor=executor,
-                )
+                state = self.get_flow_run_state(state, executor=executor,)
 
         except ENDRUN as exc:
             state = exc.state
@@ -237,11 +274,7 @@ class FlowRunner(Runner):
     @run_with_heartbeat
     @Runner.call_state_handlers
     def get_flow_run_state(
-        self,
-        state: State,
-        return_tasks: Set[Task],
-        task_runner_state_handlers: Iterable[Callable],
-        executor: "prefect.engine.executors.base.Executor",
+        self, state: State, executor: "prefect.engine.executors.base.Executor",
     ) -> State:
         """
         Runs the flow.
@@ -249,11 +282,6 @@ class FlowRunner(Runner):
         Args:
             - state (State): starting state for the Flow. Defaults to
                 `Pending`
-            - return_tasks ([Task], optional): list of Tasks to include in the
-                final returned Flow state. Defaults to `None`
-            - task_runner_state_handlers (Iterable[Callable]): A list of state change
-                handlers that will be provided to the task_runner, and called whenever a task changes
-                state.
             - executor (Executor): executor to use when performing
                 computation; defaults to the executor provided in your prefect configuration
 
@@ -266,9 +294,7 @@ class FlowRunner(Runner):
             self.logger.info("Flow is not in a Running state.")
             raise ENDRUN(state)
 
-        if return_tasks is None:
-            return_tasks = set()
-        if set(return_tasks).difference(self.run_state.flow.tasks):
+        if set(self.run_state.return_tasks).difference(self.run_state.flow.tasks):
             raise ValueError("Some tasks in return_tasks were not found in the flow.")
 
         # -- process each task in order
@@ -326,7 +352,7 @@ class FlowRunner(Runner):
                             prefect.context,
                             **self.run_state.task_contexts.get(task, {})
                         ),
-                        task_runner_state_handlers=task_runner_state_handlers,
+                        task_runner_state_handlers=self.run_state.task_state_handlers,
                         executor=executor,
                     )
 
@@ -341,7 +367,9 @@ class FlowRunner(Runner):
             reference_tasks = self.run_state.flow.reference_tasks()
 
             # wait until all terminal tasks are finished
-            final_tasks = terminal_tasks.union(reference_tasks).union(return_tasks)
+            final_tasks = terminal_tasks.union(reference_tasks).union(
+                set(self.run_state.return_tasks)
+            )
             final_states = executor.wait(
                 {
                     t: self.run_state.task_states.get(
@@ -366,7 +394,7 @@ class FlowRunner(Runner):
         terminal_states = set(
             flatten_seq([all_final_states[t] for t in terminal_tasks])
         )
-        return_states = {t: final_states[t] for t in return_tasks}
+        return_states = {t: final_states[t] for t in self.run_state.return_tasks}
 
         state = self.determine_final_state(
             state=state,

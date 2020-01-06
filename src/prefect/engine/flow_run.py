@@ -16,10 +16,11 @@ import pendulum
 
 import prefect
 from prefect.core import Edge, Flow, Task
-from prefect.engine import signals, Run
+from prefect.engine import signals
 from prefect.engine.result import Result
 from prefect.engine.result_handlers import ConstantResultHandler
 from prefect.engine.runner import ENDRUN, Runner
+from prefect.engine.run import Run
 from prefect.engine.state import (
     Cancelled,
     Failed,
@@ -57,21 +58,47 @@ class FlowRun(Run):
         - task_runner_cls (TaskRunner, optional): The class used for running
             individual Tasks. Defaults to [TaskRunner](task_runner.html)
         - executor_cls (Executor, optional): The class used for submitting task work functions.
+        - state_handlers (Iterable[Callable], optional): A list of state change handlers
+            that will be called whenever the flow changes state, providing an
+            opportunity to inspect or modify the new state. The handler
+            will be passed the flow runner instance, the old (prior) state, and the new
+            (current) state, with the following signature:
+                `state_handler(fr: FlowRunner, old_state: State, new_state: State) -> Optional[State]`
+            If multiple functions are passed, then the `new_state` argument will be the
+            result of the previous handler.
+        - return_tasks ([Task], optional): list of Tasks to include in the
+            final returned Flow state. Defaults to `None`
+        - task_runner_state_handlers (Iterable[Callable]): A list of state change
+            handlers that will be provided to the task_runner, and called whenever a task changes
+            state.
     """
 
     def __init__(
         self,
-        flow: "Flow",
-        state: Optional[State],
-        task_states: Dict[Task, State],
-        context: Dict[str, Any],
-        task_contexts: Dict[Task, Dict[str, Any]],
-        parameters: Dict[str, Any],
-        task_runner_cls: type = None,
-        executor_cls: type = None,
-        id: str = None,
+        flow: Flow,
+        state: Optional[State] = None,
+        task_states: Dict[Task, State] = None,
+        context: Dict[str, Any] = None,
+        task_contexts: Dict[Task, Dict[str, Any]] = None,
+        parameters: Dict[str, Any] = None,
+        runner_cls: Optional[type] = None,
+        task_runner_cls: Optional[type] = None,
+        executor_cls: Optional[type] = None,
+        state_handlers: Iterable[Callable] = None,
+        task_state_handlers: Iterable[Callable] = None,
+        return_tasks: Set[Task] = None,
+        id: Optional[str] = None,
     ):
-        super().__init__(id=id, state=state, context=context)
+        if runner_cls is None:
+            runner_cls = prefect.engine.get_default_flow_runner_class()
+
+        super().__init__(
+            id=id,
+            state=state,
+            context=context,
+            state_handlers=state_handlers,
+            runner_cls=runner_cls,
+        )
 
         self.flow = flow
 
@@ -79,6 +106,10 @@ class FlowRun(Run):
         self.task_states = dict(task_states or {})
         self.task_contexts = dict(task_contexts or {})
         self.parameters = dict(parameters or {})
+        self.task_state_handlers = task_state_handlers or []
+
+        if return_tasks is None:
+            self.return_tasks = self.flow.tasks
 
         if task_runner_cls is None:
             task_runner_cls = prefect.engine.get_default_task_runner_class()
@@ -95,6 +126,7 @@ class FlowRun(Run):
                 context_params[param] = value
 
         self.context.update(flow_name=self.flow.name)
+        # TODO: technically throwing scheduled time here is arbitrary and can be argued that it is mixing an agnostic store and business logic
         self.context.setdefault("scheduled_start_time", pendulum.now("utc"))
 
         # add various formatted dates to context
@@ -116,29 +148,24 @@ class FlowRun(Run):
                 task_name=task.name, task_slug=task.slug
             )
 
-    def attach(self, runner: Runner) -> None:
-        runner.state_handlers = [self.flow_state_handlers] + runner.state_handlers
+        # invoke flow handlers first before the old runner handlers
+        self.state_handlers = [self.flow_state_handlers] + self.state_handlers
 
-    def flow_state_handlers(self, old_state: State, new_state: State) -> State:
+    @staticmethod
+    def flow_state_handlers(flow, old_state: State, new_state: State) -> State:
         """
         Call all flow state handlers.
 
         Args:
+            - flow (Flow): the flow changing state
             - old_state (State): the old (previous) state
             - new_state (State): the new (current) state
 
         Returns:
             - State: the new state
         """
-        self.logger.debug(
-            "Flow '{name}': Handling state change from {old} to {new}".format(
-                name=self.flow.name,
-                old=type(old_state).__name__,
-                new=type(new_state).__name__,
-            )
-        )
-        for handler in self.flow.state_handlers:
-            new_state = handler(self.flow, old_state, new_state) or new_state
+        for handler in flow.state_handlers:
+            new_state = handler(flow, old_state, new_state) or new_state
 
         return new_state
 

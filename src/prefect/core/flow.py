@@ -828,8 +828,9 @@ class Flow:
 
     # Execution  ---------------------------------------------------------------
 
+    # TODO: return a single run obj or a collection of run obj? I think based off of existing behavior, a single run obj (oddly enough)
     def _run_on_schedule(
-        self, parameters: Dict[str, Any], runner_cls: type, **kwargs: Any
+        self, parameters: Dict[str, Any] = None, runner_cls: type = None, **kwargs: Any
     ) -> "prefect.engine.state.State":
 
         ## determine time of first run
@@ -846,18 +847,27 @@ class Flow:
         flow_state = kwargs.pop("state", flow_state)
         if not isinstance(flow_state.result, dict):
             flow_state.result = {}
+
+        # remove the task_states to affect the first run only via the state
         task_states = kwargs.pop("task_states", {})
         flow_state.result.update(task_states)
 
-        # set context for this flow run
-        flow_run_context = kwargs.pop(
-            "context", {}
-        ).copy()  # copy to avoid modification
+        # TODO: import cycle otherwise... there should be a better fix to this
+        from prefect.engine.flow_run import FlowRun
+
+        run = FlowRun(
+            flow=self,
+            state=flow_state,
+            runner_cls=runner_cls,
+            parameters=parameters,
+            **kwargs
+        )
 
         ## run this flow indefinitely, so long as its schedule has future dates
         while True:
-
-            flow_run_context.update(scheduled_start_time=next_run_time)
+            # TODO: should we be copying here?
+            current_run = copy.deepcopy(run)
+            current_run.context.update(scheduled_start_time=next_run_time)
 
             if flow_state.is_scheduled():
                 next_run_time = flow_state.start_time
@@ -871,15 +881,12 @@ class Flow:
 
             ## begin a single flow run
             while not flow_state.is_finished():
-                runner = runner_cls(flow=self)
-                flow_state = runner.run(
-                    parameters=parameters,
-                    return_tasks=self.tasks,
-                    state=flow_state,
-                    task_states=flow_state.result,
-                    context=flow_run_context,
-                    **kwargs
-                )
+                # keep any existing data from previous loops on the run obj
+                run.task_states = flow_state.result
+                run.state = flow_state
+                runner = run.runner_cls(run=run, **kwargs)
+                flow_state = runner.run()
+
                 if not isinstance(flow_state.result, dict):
                     return flow_state  # something went wrong
 
@@ -935,8 +942,10 @@ class Flow:
             flow_state = prefect.engine.state.Scheduled(
                 start_time=next_run_time, result={}
             )
-        return flow_state
+        # TODO: return a run obj, not state...
+        return current_run, flow_state
 
+    # TODO: this should eventually return a run object (not a state object)
     def run(
         self,
         parameters: Dict[str, Any] = None,
@@ -975,10 +984,6 @@ class Flow:
                 "all task states are always returned. If you want to receive a subset "
                 "of task states, use a FlowRunner directly."
             )
-
-        if runner_cls is None:
-            runner_cls = prefect.engine.get_default_flow_runner_class()
-
         # build parameters from passed dictionary and also kwargs
         parameters = parameters or {}
         for p in self.parameters():
@@ -1014,12 +1019,19 @@ class Flow:
 
         if run_on_schedule is None:
             run_on_schedule = cast(bool, prefect.config.flows.run_on_schedule)
+
         if run_on_schedule is False:
-            runner = runner_cls(flow=self)
-            state = runner.run(parameters=parameters, return_tasks=self.tasks, **kwargs)
+            # TODO: import cycle otherwise... there should be a better fix to this
+            from prefect.engine.flow_run import FlowRun
+
+            run = FlowRun(
+                flow=self, runner_cls=runner_cls, parameters=parameters, **kwargs
+            )
+            runner = run.runner_cls(run=run, return_tasks=self.tasks)
+            state = runner.run()
         else:
-            state = self._run_on_schedule(
-                parameters=parameters, runner_cls=runner_cls, **kwargs
+            run, state = self._run_on_schedule(
+                runner_cls=runner_cls, parameters=parameters, **kwargs
             )
 
         # state always should return a dict of tasks. If it's NoResult (meaning the run was
@@ -1029,7 +1041,7 @@ class Flow:
         elif isinstance(state.result, Exception):
             self.logger.error(
                 "Unexpected error occured in {runner}: {exc}".format(
-                    runner=runner_cls.__name__, exc=repr(state.result)
+                    runner=run.runner_cls.__name__, exc=repr(state.result)
                 )
             )
             return state

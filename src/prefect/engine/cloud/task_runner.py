@@ -14,7 +14,7 @@ from prefect.utilities.executors import tail_recursive
 from prefect.engine.cloud.utilities import prepare_state_for_cloud
 from prefect.engine.result import NoResult, Result
 from prefect.engine.result_handlers import ResultHandler
-from prefect.engine.runner import ENDRUN
+from prefect.engine.runner import ENDRUN, Runner
 from prefect.engine.state import (
     Cached,
     ClientFailed,
