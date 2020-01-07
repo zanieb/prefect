@@ -10,7 +10,7 @@ class LocalExecutor(Executor):
     the main thread.  To be used mainly for debugging purposes.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
@@ -62,12 +62,11 @@ class LocalExecutor(Executor):
         """
         return futures
 
-    def shutdown(self, wait=True) -> List[Any]:
+    def shutdown(self, wait: bool = True) -> List[Any]:
         """
         Signal the executor that it should cancel current pending work, prevent future work from 
         being submitted, and optionally wait for any currently running futures to finish execution.
         Args:
             - wait (bool): wait for any pending work to be completed (defaults to True)
         """
-        super().shutdown(wait=wait)
-        return []
+        return super().shutdown(wait=wait)

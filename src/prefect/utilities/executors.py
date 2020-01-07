@@ -37,7 +37,7 @@ class PeriodicMonitoredCall:
     """
 
     def __init__(
-        self, interval: int, function: Callable, logger: Logger, **kwargs
+        self, interval: int, function: Callable, logger: Logger, **kwargs: Any
     ) -> None:
         self.interval = interval
         self.function = function

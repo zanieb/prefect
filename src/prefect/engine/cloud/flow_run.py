@@ -103,12 +103,14 @@ class CloudFlowRun(FlowRun):
             scheduled_start_time=flow_run_info.scheduled_start_time,
         )
 
+        updated_task_contexts = task_contexts or {}
+        updated_task_states = task_states or {}
         tasks = {t.slug: t for t in self.flow.tasks}
         # update task states and contexts
         for task_run in flow_run_info.task_runs:
             task = tasks[task_run.task_slug]
-            task_states.setdefault(task, task_run.state)
-            task_contexts.setdefault(task, {}).update(
+            updated_task_states.setdefault(task, task_run.state)
+            updated_task_contexts.setdefault(task, {}).update(
                 task_id=task_run.task_id,
                 task_run_id=task_run.id,
                 task_run_version=task_run.version,
@@ -119,20 +121,22 @@ class CloudFlowRun(FlowRun):
 
         # update parameters, prioritizing kwarg-provided params
         updated_parameters = flow_run_info.parameters or {}  # type: ignore
-        updated_parameters.update(parameters)
+        updated_parameters.update(parameters or {})
 
         super().__init__(
             flow=flow,
             state=state,
-            task_states=task_states,
+            task_states=updated_task_states,
             context=updated_context,
-            task_contexts=task_contexts,
+            task_contexts=updated_task_contexts,
             parameters=updated_parameters,
             id=id,
             **kwargs,
         )
 
-    def flow_state_handlers(self, old_state: State, new_state: State) -> State:
+    def flow_state_handlers(
+        self, flow: Flow, old_state: State, new_state: State
+    ) -> State:
         """
         Call all flow state handlers.
 
@@ -146,8 +150,8 @@ class CloudFlowRun(FlowRun):
         raise_on_exception = prefect.context.get("raise_on_exception", False)
 
         try:
-            new_state = super().flow_state_handler(
-                old_state=old_state, new_state=new_state
+            new_state = super().flow_state_handlers(
+                flow=flow, old_state=old_state, new_state=new_state
             )
         except Exception as exc:
             msg = "Exception raised while calling state handlers: {}".format(repr(exc))
@@ -172,7 +176,3 @@ class CloudFlowRun(FlowRun):
         prefect.context.update(flow_run_version=version + 1)
 
         return new_state
-
-    def __repr__(self) -> str:
-        # TODO: opportunity to add more useful info here
-        return '<"FlowRun">'

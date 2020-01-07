@@ -57,7 +57,7 @@ class DaskExecutor(Executor):
         self.debug = debug
         self.is_started = False
         self.kwargs = kwargs
-        self.futures = []
+        self.futures = []  # type: List[Future]
         super().__init__()
 
     @contextmanager
@@ -205,7 +205,7 @@ class DaskExecutor(Executor):
 
         return results
 
-    def shutdown(self, wait=True) -> List[Any]:
+    def shutdown(self, wait: bool = True) -> List[Any]:
         """
         Signal the executor that it should cancel current pending work, prevent future work from 
         being submitted, and optionally wait for any currently running futures to finish execution.
@@ -233,7 +233,7 @@ class LocalDaskExecutor(Executor):
     def __init__(self, scheduler: str = "synchronous", **kwargs: Any):
         self.scheduler = scheduler
         self.kwargs = kwargs
-        self.futures = []
+        self.futures = []  # type: List[Future]
         super().__init__()
 
     @contextmanager
@@ -308,7 +308,7 @@ class LocalDaskExecutor(Executor):
 
         return results
 
-    def shutdown(self, wait=True) -> List[Any]:
+    def shutdown(self, wait: bool = True) -> List[Any]:
         """
         Signal the executor that it should cancel current pending work, prevent future work from 
         being submitted, and optionally wait for any currently running futures to finish execution.

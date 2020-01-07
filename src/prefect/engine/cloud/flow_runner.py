@@ -13,6 +13,7 @@ from prefect.engine.cloud.utilities import prepare_state_for_cloud
 from prefect.engine.flow_runner import FlowRunner
 from prefect.engine.runner import ENDRUN
 from prefect.engine.state import Failed, State, Cancelled
+from prefect.engine.executors import Executor
 from prefect.utilities.executors import PeriodicMonitoredCall
 from prefect.utilities.graphql import with_args
 
@@ -27,42 +28,49 @@ class CloudFlowRunner(FlowRunner):
     def __init__(self, run: CloudFlowRun) -> None:
         # TODO: bad: both the runner and run object have a client
         self.client = Client()
-        self.state_thread = None
-        self.worker_thread = None
-        self.queue = queue.Queue()
-        self.executor = None
+        self.state_thread = None  # type: Optional[PeriodicMonitoredCall]
+        self.worker_thread = None  # type: Optional[threading.Thread]
+        self.queue = queue.Queue()  # type: queue.Queue
+        self.executor = None  # type: Optional[Executor]
+        self.state = None  # type: Optional[State]
         super().__init__(run=run)
 
     def _heartbeat(self) -> bool:
         self.client.update_flow_run_heartbeat(self.run_state.id)
+        return True
 
     # TODO: delete this when task runner is not using this in the base class
     def call_runner_target_handlers(self, old_state: State, new_state: State) -> State:
         return new_state
 
-    def _request_exit(self):
+    def _request_exit(self) -> None:
         self.queue.put(QueueItem(event="exit", payload=None))
 
-    def _on_exit(self):
-        was_running = self.state_thread.cancel()
-        if not was_running:
-            self.logger.warning("State thread already stopped before cancellation.")
+    def _on_exit(self) -> None:
+        if self.state_thread:
+            was_running = self.state_thread.cancel()
+            if not was_running:
+                self.logger.warning("State thread already stopped before cancellation.")
+        else:
+            self.logger.error("State thread missing!")
 
-        self.worker_thread.join()
+        if self.worker_thread:
+            self.worker_thread.join()
+        else:
+            self.logger.error("Worker thread missing!")
         self.logger.debug("Exiting")
 
-    def check_valid_initial_state(self, flow_run_id):
+    def check_valid_initial_state(self, flow_run_id: str) -> bool:
         state = self.fetch_current_flow_run_state(flow_run_id)
         return state != Cancelled
 
     # TODO: consider moving this to the base class
-    def cancel(self, wait=True) -> List[Any]:
+    def cancel(self, wait: bool = True) -> List[Any]:
         if self.executor:
             return self.executor.shutdown(wait=wait)
         raise RuntimeError("Flow is not running, thus cannot be cancelled")
 
-    def run(self, executor: "prefect.engine.executors.Executor" = None,) -> State:
-        self.logger.debug("Starting")
+    def run(self, executor: "prefect.engine.executors.Executor" = None) -> State:
         if not self.check_valid_initial_state(self.run_state.id):
             raise RuntimeError("Flow run initial state is invalid. It will not be run!")
 
@@ -80,14 +88,13 @@ class CloudFlowRunner(FlowRunner):
             name_prefix="PrefectFlowRunState-{}".format(self.run_state.id)
         )
 
-        def controlled_run():
+        def controlled_run() -> None:
             try:
                 if executor is None:
                     executor = self.run_state.executor_cls()
                 self.executor = executor
 
-                # TODO: return state back to main thread
-                state = super().run(executor=executor,)
+                self.state = super().run(executor=executor)
             except Exception:
                 self.logger.exception("Error occured on run")
 
@@ -120,10 +127,9 @@ class CloudFlowRunner(FlowRunner):
             self.logger.exception("Unhandled exception in the event loop")
 
         self._on_exit()
-        # TODO: return result state
-        return  # ...
+        return self.state
 
-    def fetch_current_flow_run_state(self, flow_run_id):
+    def fetch_current_flow_run_state(self, flow_run_id: str) -> State:
         query = {
             "query": {
                 with_args("flow_run_by_pk", {"id": flow_run_id}): {
@@ -136,7 +142,7 @@ class CloudFlowRunner(FlowRunner):
         flow_run = self.client.graphql(query).data.flow_run_by_pk
         return State.parse(flow_run.state)
 
-    def stream_flow_run_state_events(self, flow_run_id):
+    def stream_flow_run_state_events(self, flow_run_id: str) -> None:
         state = self.fetch_current_flow_run_state(flow_run_id)
 
         # note: currently we are polling the latest known state. In the future when subscriptions are

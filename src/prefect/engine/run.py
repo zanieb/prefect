@@ -1,5 +1,6 @@
 import collections
 import functools
+import uuid
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, TYPE_CHECKING
 
 import prefect
@@ -15,10 +16,10 @@ class Run:
     def __init__(
         self,
         state: Optional[State],
-        context: Dict[str, Any],
+        context: Optional[Dict[str, Any]],
         runner_cls: type,
         state_handlers: Iterable[Callable] = None,
-        id: str = None,
+        id: Optional[str] = None,
     ):
         self.logger = logging.get_logger(type(self).__name__)
 
@@ -29,9 +30,13 @@ class Run:
         self.state = state or Pending()
         self.context = dict(context or {})
         self.state_handlers = state_handlers or []
-        self.id = id
+        self.id = id or str(uuid.uuid4())
         self.runner_cls = runner_cls
 
     def __repr__(self) -> str:
-        # TODO: opportunity to add more useful info here
-        return '<"Run">'
+        state = None
+        if self.state:
+            state = self.state.__class__.__name__
+        return '<"{}" id={} runner={} state={}>'.format(
+            self.__class__.__name__, self.id, self.runner_cls.__name__, str(state)
+        )

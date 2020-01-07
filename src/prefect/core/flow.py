@@ -831,7 +831,7 @@ class Flow:
     # TODO: return a single run obj or a collection of run obj? I think based off of existing behavior, a single run obj (oddly enough)
     def _run_on_schedule(
         self, parameters: Dict[str, Any] = None, runner_cls: type = None, **kwargs: Any
-    ) -> "prefect.engine.state.State":
+    ) -> "prefect.engine.flow_run.FlowRun":
 
         ## determine time of first run
         try:
@@ -882,13 +882,14 @@ class Flow:
             ## begin a single flow run
             while not flow_state.is_finished():
                 # keep any existing data from previous loops on the run obj
-                run.task_states = flow_state.result
-                run.state = flow_state
-                runner = run.runner_cls(run=run, **kwargs)
+                current_run.task_states = flow_state.result
+                current_run.state = flow_state
+                runner = run.runner_cls(run=current_run)
                 flow_state = runner.run()
 
                 if not isinstance(flow_state.result, dict):
-                    return flow_state  # something went wrong
+                    current_run.state = flow_state
+                    return current_run  # something went wrong
 
                 task_states = list(flow_state.result.values())
                 for s in filter(lambda x: x.is_mapped(), task_states):
@@ -942,8 +943,8 @@ class Flow:
             flow_state = prefect.engine.state.Scheduled(
                 start_time=next_run_time, result={}
             )
-        # TODO: return a run obj, not state...
-        return current_run, flow_state
+        current_run.state = flow_state
+        return current_run
 
     # TODO: this should eventually return a run object (not a state object)
     def run(
@@ -952,7 +953,7 @@ class Flow:
         run_on_schedule: bool = None,
         runner_cls: type = None,
         **kwargs: Any
-    ) -> "prefect.engine.state.State":
+    ) -> "prefect.engine.flow_run.FlowRun":
         """
         Run the flow on its schedule using an instance of a FlowRunner.  If the Flow has no schedule,
         a single stateful run will occur (including retries).
@@ -1028,30 +1029,30 @@ class Flow:
                 flow=self, runner_cls=runner_cls, parameters=parameters, **kwargs
             )
             runner = run.runner_cls(run=run, return_tasks=self.tasks)
-            state = runner.run()
+            runner.run()
         else:
-            run, state = self._run_on_schedule(
+            run = self._run_on_schedule(
                 runner_cls=runner_cls, parameters=parameters, **kwargs
             )
 
         # state always should return a dict of tasks. If it's NoResult (meaning the run was
         # interrupted before any tasks were executed), we set the dict manually.
-        if state._result == NoResult:
-            state.result = {}
-        elif isinstance(state.result, Exception):
+        if run.state._result == NoResult:
+            run.state.result = {}
+        elif isinstance(run.state.result, Exception):
             self.logger.error(
                 "Unexpected error occured in {runner}: {exc}".format(
-                    runner=run.runner_cls.__name__, exc=repr(state.result)
+                    runner=run.runner_cls.__name__, exc=repr(run.state.result)
                 )
             )
-            return state
+            return run
 
         for task in self.tasks or []:
-            if task not in state.result:
-                state.result[task] = prefect.engine.state.Pending(
+            if task not in run.state.result:
+                run.state.result[task] = prefect.engine.state.Pending(
                     message="Task not run."
                 )
-        return state
+        return run
 
     # Visualization ------------------------------------------------------------
 

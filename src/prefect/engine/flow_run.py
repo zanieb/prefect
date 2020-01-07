@@ -33,6 +33,7 @@ from prefect.engine.state import (
     Success,
 )
 from prefect.engine.task_runner import TaskRunner
+from prefect.engine.result import NoResult
 from prefect.utilities.collections import flatten_seq
 from prefect.utilities.executors import run_with_heartbeat
 from prefect.utilities import logging
@@ -77,7 +78,7 @@ class FlowRun(Run):
         self,
         flow: Flow,
         state: Optional[State] = None,
-        task_states: Dict[Task, State] = None,
+        task_states: Optional[Dict[Task, State]] = None,
         context: Dict[str, Any] = None,
         task_contexts: Dict[Task, Dict[str, Any]] = None,
         parameters: Dict[str, Any] = None,
@@ -85,7 +86,7 @@ class FlowRun(Run):
         task_runner_cls: Optional[type] = None,
         executor_cls: Optional[type] = None,
         state_handlers: Iterable[Callable] = None,
-        task_state_handlers: Iterable[Callable] = None,
+        task_runner_state_handlers: Iterable[Callable] = None,
         return_tasks: Set[Task] = None,
         id: Optional[str] = None,
     ):
@@ -106,7 +107,7 @@ class FlowRun(Run):
         self.task_states = dict(task_states or {})
         self.task_contexts = dict(task_contexts or {})
         self.parameters = dict(parameters or {})
-        self.task_state_handlers = task_state_handlers or []
+        self.task_runner_state_handlers = task_runner_state_handlers or []
 
         if return_tasks is None:
             self.return_tasks = self.flow.tasks
@@ -149,10 +150,11 @@ class FlowRun(Run):
             )
 
         # invoke flow handlers first before the old runner handlers
-        self.state_handlers = [self.flow_state_handlers] + self.state_handlers
+        self.state_handlers = [self.flow_state_handlers] + list(self.state_handlers)
 
-    @staticmethod
-    def flow_state_handlers(flow, old_state: State, new_state: State) -> State:
+    def flow_state_handlers(
+        self, flow: Flow, old_state: State, new_state: State
+    ) -> State:
         """
         Call all flow state handlers.
 
@@ -169,12 +171,39 @@ class FlowRun(Run):
 
         return new_state
 
-    # TODO: allow this object to be a facade for nested attributes
-    # ... this is a bad example, but you get the idea
     @property
-    def result(self):
+    def states(self) -> Result:
         return self.state.result
 
-    def __repr__(self) -> str:
-        # TODO: opportunity to add more useful info here
-        return '<"FlowRun">'
+    @property
+    def results(self) -> Dict[Task, Result]:
+        return {task: state.result for task, state in self.state.result.items()}
+
+    # return state of single task or none (no raising of errors unless the function is misused)
+    def task_state(self, task: Task = None, name: str = None) -> Optional[State]:
+        if not task and not name:
+            raise RuntimeError("Must provide either state or name")
+
+        if task and name:
+            raise RuntimeError("Provide either state or name, not both")
+
+        if task:
+            return self.state.result.get(task)
+
+        if name:
+            final_result = None
+            for t, result in self.state.result.items():
+                if t and t.name == name:
+                    if final_result:
+                        raise RuntimeError("Multiple tasks match the given name")
+                    final_result = result
+            return final_result
+        return None
+
+    # return the result, NoResult or raise error if not found
+    def task_result(self, task: Task = None, name: str = None) -> Result:
+        state = self.task_state(task=task, name=name)
+        if not state:
+            raise RuntimeError("Task not found")
+
+        return state.result

@@ -139,17 +139,12 @@ class FlowRunner(Runner):
             raise ENDRUN(Failed(msg, result=exc))
         return new_state
 
-    def run(self, executor: "prefect.engine.executors.Executor" = None,) -> State:
+    def run(self, executor: "prefect.engine.executors.Executor" = None) -> State:
         """
         The main endpoint for FlowRunners.  Calling this method will perform all
         computations contained within the Flow and return the final state of the Flow.
 
         Args:
-            - return_tasks ([Task], optional): list of Tasks to include in the
-                final returned Flow state. Defaults to `None`
-            - task_runner_state_handlers (Iterable[Callable], optional): A list of state change
-                handlers that will be provided to the task_runner, and called whenever a task changes
-                state.
             - executor (Executor, optional): executor to use when performing
                 computation; defaults to the executor specified in your prefect configuration
 
@@ -352,7 +347,7 @@ class FlowRunner(Runner):
                             prefect.context,
                             **self.run_state.task_contexts.get(task, {})
                         ),
-                        task_runner_state_handlers=self.run_state.task_state_handlers,
+                        task_runner_state_handlers=self.run_state.task_runner_state_handlers,
                         executor=executor,
                     )
 
