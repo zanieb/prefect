@@ -29,6 +29,7 @@ from prefect.engine.state import (
     Scheduled,
     State,
     Success,
+    Skipped,
 )
 from prefect.engine.task_runner import TaskRunner
 from prefect.utilities.collections import flatten_seq
@@ -234,6 +235,9 @@ class FlowRunner(Runner):
         if executor is None:
             executor = prefect.engine.get_default_executor_class()()
 
+        # this should be flushed in case of subsequent runs
+        self.task_environments = {}
+
         try:
             state, task_states, context, task_contexts = self.initialize_run(
                 state=state,
@@ -242,6 +246,18 @@ class FlowRunner(Runner):
                 task_contexts=task_contexts,
                 parameters=parameters,
             )
+
+            # track task environments separate from the task object. Since FlowRunners
+            # use task.environment to cue when to submit to an executor or create a nested
+            # FlowRunner, it is important to remove this cue as a termination condition.
+            # Only the top-most FlowRunner should be allowed to create nested
+            for task in self.flow.tasks:
+                self.task_environments[task] = None
+                if task.environment:
+                    self.task_environments[task] = task.environment
+
+                # remove the environment from the task to prevent the runner
+                task.environment = None
 
             with prefect.context(context):
                 state = self.check_flow_is_pending_or_running(state)
@@ -275,6 +291,12 @@ class FlowRunner(Runner):
                 result=exc,
             )
             state = self.handle_state_change(state or Pending(), new_state)
+
+        finally:
+            # restore task environment objects onto the original tasks
+            for task in self.flow.tasks:
+                if task in self.task_environments:
+                    task.environment = self.task_environments[task]
 
         return state
 
@@ -438,16 +460,40 @@ class FlowRunner(Runner):
 
                 # -- run the task
 
-                with prefect.context(task_full_name=task.name, task_tags=task.tags):
-                    task_states[task] = executor.submit(
-                        self.run_task,
-                        task=task,
-                        state=task_state,
-                        upstream_states=upstream_states,
-                        context=dict(prefect.context, **task_contexts.get(task, {})),
-                        task_runner_state_handlers=task_runner_state_handlers,
-                        executor=executor,
+                if self.task_environments[task]:
+                    # run an individual task in the appropriate environment with a nested FlowRunner.
+                    # all previous states will be preserved, any tasks not relating to the target task
+                    # will have a predetermined state of Skipped
+                    temp_task_states = {}
+                    for t in self.flow.sorted_tasks():
+                        if t == task:
+                            continue
+                        if t in task_states:
+                            temp_task_states[t] = task_states[t]
+                        else:
+                            temp_task_states[t] = Skipped()
+
+                    state = self.task_environments[task].execute(
+                        flow=self.flow,
+                        task_states=temp_task_states,
+                        return_tasks=set(return_tasks),
                     )
+                    task_states[task] = state.result[task]
+
+                else:
+                    # submit individual task to the flow executor
+                    with prefect.context(task_full_name=task.name, task_tags=task.tags):
+                        task_states[task] = executor.submit(
+                            self.run_task,
+                            task=task,
+                            state=task_state,
+                            upstream_states=upstream_states,
+                            context=dict(
+                                prefect.context, **task_contexts.get(task, {})
+                            ),
+                            task_runner_state_handlers=task_runner_state_handlers,
+                            executor=executor,
+                        )
 
             # ---------------------------------------------
             # Collect results

@@ -51,7 +51,11 @@ class RemoteEnvironment(Environment):
         return []
 
     def execute(  # type: ignore
-        self, storage: "Storage", flow_location: str, **kwargs: Any
+        self,
+        flow=None,
+        storage: "Storage" = None,
+        flow_location: str = None,
+        **kwargs: Any
     ) -> None:
         """
         Run a flow from the `flow_location` here using the specified executor and
@@ -74,14 +78,16 @@ class RemoteEnvironment(Environment):
                 get_default_flow_runner_class,
             )
 
-            # Load serialized flow from file and run it with a DaskExecutor
-            flow = storage.get_flow(flow_location)
+            if not flow:
+                # Load serialized flow from file and run it with a DaskExecutor
+                flow = storage.get_flow(flow_location)
+
             with set_temporary_config({"engine.executor.default_class": self.executor}):
                 executor = get_default_executor_class()
 
             executor = executor(**self.executor_kwargs)
             runner_cls = get_default_flow_runner_class()
-            runner_cls(flow=flow).run(executor=executor)
+            result = runner_cls(flow=flow).run(executor=executor, **kwargs)
         except Exception as exc:
             self.logger.exception(
                 "Unexpected error raised during flow run: {}".format(exc)
@@ -91,3 +97,5 @@ class RemoteEnvironment(Environment):
             # Call on_exit callback if specified
             if self.on_exit:
                 self.on_exit()
+
+        return result

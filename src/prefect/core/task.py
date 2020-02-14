@@ -179,10 +179,12 @@ class Task(metaclass=SignatureValidator):
         result_handler: "ResultHandler" = None,
         state_handlers: List[Callable] = None,
         on_failure: Callable = None,
+        environment=None,
     ):
 
         self.name = name or type(self).__name__
         self.slug = slug or str(uuid.uuid4())
+        self.environment = environment
 
         self.logger = logging.get_logger("Task: {}".format(self.name))
 
