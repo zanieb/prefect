@@ -470,7 +470,8 @@ class FlowRunner(Runner):
                     for t in self.flow.sorted_tasks():
                         if t == task:
                             continue
-                        if t in task_states:
+                        # Note: cloud may have already put downstream tasks in pending, this should be ignored for the nested flow
+                        if t in task_states and not task_states[t].is_pending():
                             temp_task_states[t] = task_states[t]
                         else:
                             temp_task_states[t] = Skipped()
@@ -479,7 +480,7 @@ class FlowRunner(Runner):
                         state=state,
                         flow=self.flow,
                         task_states=temp_task_states,
-                        return_tasks=set(return_tasks),
+                        return_tasks=set([task]),
                     )
                     task_states[task] = nested_flow_state.result[task]
 
