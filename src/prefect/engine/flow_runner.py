@@ -259,6 +259,8 @@ class FlowRunner(Runner):
                 # remove the environment from the task to prevent the runner
                 task.environment = None
 
+            # TODO: call environment.setup() here for each task env
+
             with prefect.context(context):
                 state = self.check_flow_is_pending_or_running(state)
                 state = self.check_flow_reached_start_time(state)
@@ -473,12 +475,13 @@ class FlowRunner(Runner):
                         else:
                             temp_task_states[t] = Skipped()
 
-                    state = self.task_environments[task].execute(
+                    nested_flow_state = self.task_environments[task].execute(
+                        state=state,
                         flow=self.flow,
                         task_states=temp_task_states,
                         return_tasks=set(return_tasks),
                     )
-                    task_states[task] = state.result[task]
+                    task_states[task] = nested_flow_state.result[task]
 
                 else:
                     # submit individual task to the flow executor
