@@ -47,9 +47,9 @@ from prefect.engine.state import (
     TriggerFailed,
 )
 from prefect.utilities.executors import (
+    RecursiveCall,
     run_with_heartbeat,
     tail_recursive,
-    RecursiveCall,
 )
 
 if TYPE_CHECKING:

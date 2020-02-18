@@ -1,9 +1,9 @@
-import cloudpickle
 import queue
 import threading
 import time
 from typing import Any
 
+import cloudpickle
 import pytest
 
 import prefect

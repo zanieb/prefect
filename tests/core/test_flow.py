@@ -19,20 +19,20 @@ from prefect.core.task import Parameter, Task
 from prefect.engine.cache_validators import all_inputs, partial_inputs_only
 from prefect.engine.executors import LocalExecutor
 from prefect.engine.result_handlers import LocalResultHandler, ResultHandler
-from prefect.engine.signals import PrefectError, FAIL, LOOP
+from prefect.engine.signals import FAIL, LOOP, PrefectError
 from prefect.engine.state import (
     Cancelled,
     Failed,
     Finished,
     Mapped,
     Paused,
-    Resume,
     Pending,
+    Resume,
     Skipped,
     State,
     Success,
-    TriggerFailed,
     TimedOut,
+    TriggerFailed,
 )
 from prefect.schedules.clocks import ClockEvent
 from prefect.tasks.core.function import FunctionTask

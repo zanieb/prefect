@@ -22,8 +22,8 @@ import prefect.engine.cache_validators
 import prefect.engine.signals
 import prefect.triggers
 from prefect.utilities import logging
-from prefect.utilities.tasks import unmapped
 from prefect.utilities.notifications import callback_factory
+from prefect.utilities.tasks import unmapped
 
 if TYPE_CHECKING:
     from prefect.core.flow import Flow  # pylint: disable=W0611

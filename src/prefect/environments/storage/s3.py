@@ -1,7 +1,6 @@
 import io
 from typing import TYPE_CHECKING, Any, Dict, List
 
-
 import cloudpickle
 import pendulum
 from slugify import slugify

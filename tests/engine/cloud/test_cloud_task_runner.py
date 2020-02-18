@@ -5,11 +5,11 @@ import sys
 import tempfile
 import time
 import uuid
-from box import Box
 from unittest.mock import MagicMock
 
 import cloudpickle
 import pytest
+from box import Box
 
 import prefect
 from prefect.client import Client
@@ -26,10 +26,10 @@ from prefect.engine.state import (
     ClientFailed,
     Failed,
     Finished,
-    Queued,
     Mapped,
     Paused,
     Pending,
+    Queued,
     Retrying,
     Running,
     Skipped,

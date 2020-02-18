@@ -1,12 +1,12 @@
 import datetime
 import time
 import uuid
-from box import Box
 from datetime import timedelta
 from unittest.mock import MagicMock
 
 import pendulum
 import pytest
+from box import Box
 
 import prefect
 from prefect.client.client import Client, FlowRunInfoResult

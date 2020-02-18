@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
-from click.testing import CliRunner
 import pytest
+from click.testing import CliRunner
 
 from prefect.cli.agent import agent
 

@@ -1,8 +1,8 @@
 import os
+import socket
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Union
 
 import cloudpickle
-import socket
 from slugify import slugify
 
 import prefect

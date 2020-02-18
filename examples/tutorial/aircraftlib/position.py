@@ -1,5 +1,5 @@
-from typing import Tuple, Generator
 import math
+from typing import Generator, Tuple
 
 # Semi-axes of WGS-84 geoidal reference
 WGS84_a = 6378137.0  # Major semiaxis [m]

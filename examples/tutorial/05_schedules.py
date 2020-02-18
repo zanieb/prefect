@@ -1,6 +1,7 @@
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
+
 import aircraftlib as aclib
-from prefect import task, Flow, Parameter
+from prefect import Flow, Parameter, task
 from prefect.schedules import IntervalSchedule
 
 

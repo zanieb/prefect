@@ -1,8 +1,8 @@
-import os
 import multiprocessing
+import os
 import sys
-import threading
 import tempfile
+import threading
 import time
 from datetime import timedelta
 from unittest.mock import MagicMock
@@ -12,10 +12,10 @@ import pytest
 import prefect
 from prefect.utilities.configuration import set_temporary_config
 from prefect.utilities.executors import (
-    timeout_handler,
+    RecursiveCall,
     run_with_heartbeat,
     tail_recursive,
-    RecursiveCall,
+    timeout_handler,
 )
 
 

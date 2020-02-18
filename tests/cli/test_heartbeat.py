@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
-from click.testing import CliRunner
 import pytest
+from click.testing import CliRunner
 
 from prefect.cli.heartbeat import heartbeat
 from prefect.utilities.configuration import set_temporary_config

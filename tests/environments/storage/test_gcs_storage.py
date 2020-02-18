@@ -1,6 +1,6 @@
 import io
-from unittest.mock import MagicMock, patch, call
 import warnings
+from unittest.mock import MagicMock, call, patch
 
 import cloudpickle
 import pytest

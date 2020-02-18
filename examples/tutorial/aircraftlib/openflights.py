@@ -1,7 +1,7 @@
-import pathlib
 import collections
 import csv
-from typing import Dict, List, Any
+import pathlib
+from typing import Any, Dict, List
 
 
 def _capture_path(source: str) -> pathlib.Path:

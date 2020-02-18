@@ -3,13 +3,12 @@ import tempfile
 from unittest.mock import MagicMock
 
 import cloudpickle
+from botocore.exceptions import ClientError
 
 import prefect
 from prefect.environments import FargateTaskEnvironment
 from prefect.environments.storage import Docker
 from prefect.utilities.configuration import set_temporary_config
-
-from botocore.exceptions import ClientError
 
 
 def test_create_fargate_task_environment():

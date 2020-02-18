@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import ClientError
 
 from prefect.agent.fargate import FargateAgent
 from prefect.environments.storage import Docker, Local
@@ -9,8 +10,6 @@ from prefect.utilities.graphql import GraphQLResult
 
 pytest.importorskip("boto3")
 pytest.importorskip("botocore")
-
-from botocore.exceptions import ClientError
 
 
 def test_fargate_agent_init(monkeypatch, runner_token):

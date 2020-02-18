@@ -1,8 +1,7 @@
-from typing import List, Any, Dict
+from typing import Any, Dict, List
 
-from sqlalchemy import Column, String, Integer, Boolean, Float
+from sqlalchemy import Boolean, Column, Float, Integer, String, create_engine
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .openflights import OpenFlightsData

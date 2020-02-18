@@ -1,7 +1,7 @@
-import _thread
 import warnings
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
+import _thread
 import prefect
 from prefect.client import Client
 from prefect.core import Flow, Task

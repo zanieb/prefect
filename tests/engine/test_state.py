@@ -11,8 +11,8 @@ import prefect
 from prefect.engine.result import NoResult, Result, SafeResult
 from prefect.engine.result_handlers import JSONResultHandler, LocalResultHandler
 from prefect.engine.state import (
-    Cancelled,
     Cached,
+    Cancelled,
     ClientFailed,
     Failed,
     Finished,

@@ -1,8 +1,9 @@
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
+
 import aircraftlib as aclib
-from prefect import task, Flow, Parameter
-from prefect.schedules import IntervalSchedule
+from prefect import Flow, Parameter, task
 from prefect.engine.executors import DaskExecutor
+from prefect.schedules import IntervalSchedule
 
 
 @task(max_retries=3, retry_delay=timedelta(seconds=1))

@@ -2,14 +2,13 @@ import os
 from unittest.mock import MagicMock
 
 import pytest
-
 from azureml.core.workspace import Workspace
 
 import prefect
 from prefect.tasks.azureml import (
-    DatastoreRegisterBlobContainer,
-    DatastoreList,
     DatastoreGet,
+    DatastoreList,
+    DatastoreRegisterBlobContainer,
     DatastoreUpload,
 )
 from prefect.utilities.configuration import set_temporary_config

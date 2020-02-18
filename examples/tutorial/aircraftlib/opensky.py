@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os
+import binascii
 import json
+import os
 import pathlib
 import struct
-import binascii
-from typing import Any, List, Dict
+from typing import Any, Dict, List
 
 import requests
 
 from .position import Area
-
 
 # OpenSky API states/all reference
 # Source: https://opensky-network.org/apidoc/rest.html#all-state-vectors

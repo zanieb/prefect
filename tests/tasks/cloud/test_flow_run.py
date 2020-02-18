@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from prefect.tasks.cloud.flow_run import FlowRunTask
 

@@ -1,7 +1,8 @@
+from unittest.mock import MagicMock
+
 import box
 import cloudpickle
 import pytest
-from unittest.mock import MagicMock
 
 import prefect
 from prefect.engine.result_handlers import SecretResultHandler

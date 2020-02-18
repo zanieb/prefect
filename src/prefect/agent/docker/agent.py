@@ -1,6 +1,6 @@
+import multiprocessing
 from sys import platform
 from typing import Iterable, List
-import multiprocessing
 
 import docker
 

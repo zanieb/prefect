@@ -4,8 +4,8 @@ import pytest
 
 from prefect.tasks.azureml import (
     DatasetCreateFromDelimitedFiles,
-    DatasetCreateFromParquetFiles,
     DatasetCreateFromFiles,
+    DatasetCreateFromParquetFiles,
 )
 
 

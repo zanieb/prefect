@@ -1,5 +1,5 @@
-from unittest.mock import MagicMock
 import logging
+from unittest.mock import MagicMock
 
 import pytest
 

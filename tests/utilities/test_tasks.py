@@ -6,8 +6,8 @@ from prefect.core import Flow, Task
 from prefect.engine.flow_runner import FlowRunner
 from prefect.engine.signals import PAUSE
 from prefect.engine.state import Paused, Resume
-from prefect.utilities import tasks
 from prefect.tasks.core.constants import Constant
+from prefect.utilities import tasks
 
 
 class TestTaskDecorator:

@@ -11,7 +11,6 @@ from prefect import Flow, Task, task
 from prefect.environments import Environment, RemoteEnvironment
 from prefect.environments.storage import _healthcheck as healthchecks
 
-
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="These checks only run within UNIX machines"
 )

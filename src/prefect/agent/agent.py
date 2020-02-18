@@ -1,14 +1,14 @@
-import os
 import ast
 import functools
 import logging
+import os
 import signal
 import sys
-import time
 import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor, Future
-from typing import Any, Generator, Iterable, Union, Set
+from typing import Any, Generator, Iterable, Set, Union
 
 import pendulum
 
@@ -16,9 +16,9 @@ from prefect import config
 from prefect.client import Client
 from prefect.engine.state import Failed, Submitted
 from prefect.serialization import state
+from prefect.utilities.context import context
 from prefect.utilities.exceptions import AuthorizationError
 from prefect.utilities.graphql import GraphQLResult, with_args
-from prefect.utilities.context import context
 
 ascii_name = r"""
  ____            __           _        _                    _

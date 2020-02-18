@@ -1,13 +1,13 @@
 import collections
 import os
-import pendulum
-import pytest
 import sys
 import tempfile
-
 from datetime import datetime, timedelta
 from time import sleep, time
 from unittest.mock import MagicMock
+
+import pendulum
+import pytest
 
 import prefect
 from prefect.client import Secret

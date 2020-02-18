@@ -4,12 +4,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from marshmallow.exceptions import ValidationError
+from testfixtures import LogCapture, compare
 from testfixtures.mock import call
 from testfixtures.popen import MockPopen
-from testfixtures import compare, LogCapture
 
 from prefect.agent.local import LocalAgent
-from prefect.environments.storage import Docker, Local, Azure, GCS, S3
+from prefect.environments.storage import GCS, S3, Azure, Docker, Local
 from prefect.utilities.configuration import set_temporary_config
 from prefect.utilities.graphql import GraphQLResult
 

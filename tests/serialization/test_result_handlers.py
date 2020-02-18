@@ -1,6 +1,6 @@
+import os
 from unittest.mock import MagicMock, patch
 
-import os
 import pytest
 
 import prefect

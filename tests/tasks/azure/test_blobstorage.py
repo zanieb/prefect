@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock
 
+import azure.storage.blob
 import pytest
 
-import azure.storage.blob
 import prefect
 from prefect.tasks.azure import BlobStorageDownload, BlobStorageUpload
 from prefect.utilities.configuration import set_temporary_config

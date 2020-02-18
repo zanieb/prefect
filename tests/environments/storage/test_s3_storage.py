@@ -3,14 +3,13 @@ from unittest.mock import MagicMock
 
 import cloudpickle
 import pytest
+from botocore.exceptions import ClientError
 
 from prefect import Flow
 from prefect.environments.storage import S3
 
 pytest.importorskip("boto3")
 pytest.importorskip("botocore")
-
-from botocore.exceptions import ClientError
 
 
 def test_create_s3_storage():

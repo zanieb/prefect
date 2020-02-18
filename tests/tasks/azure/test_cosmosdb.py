@@ -1,14 +1,14 @@
 from unittest.mock import MagicMock
-from prefect.tasks.azure.cosmosdb import CosmosDBCreateItem
 
 import pytest
 
 import prefect
 from prefect.tasks.azure import (
     CosmosDBCreateItem,
-    CosmosDBReadItems,
     CosmosDBQueryItems,
+    CosmosDBReadItems,
 )
+from prefect.tasks.azure.cosmosdb import CosmosDBCreateItem
 from prefect.utilities.configuration import set_temporary_config
 
 
