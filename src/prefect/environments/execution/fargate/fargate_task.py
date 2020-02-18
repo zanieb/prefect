@@ -141,10 +141,20 @@ class FargateTaskEnvironment(Environment):
             if key in definition_kwarg_list:
                 task_definition_kwargs.update({key: item})
 
+        self.logger.info("==============================")
+        self.logger.info("TASK DEFINITION KWARGS")
+        self.logger.info("==============================")
+        self.logger.info(task_definition_kwargs)
+
         task_run_kwargs = {}
         for key, item in user_kwargs.items():
             if key in run_kwarg_list:
                 task_run_kwargs.update({key: item})
+
+        self.logger.info("==============================")
+        self.logger.info("TASK RUN KWARGS")
+        self.logger.info("==============================")
+        self.logger.info(task_run_kwargs)
 
         return task_definition_kwargs, task_run_kwargs
 
@@ -231,6 +241,11 @@ class FargateTaskEnvironment(Environment):
                 "-c",
                 "python -c 'import prefect; prefect.Flow.load(prefect.context.flow_file_path).environment.run_flow()'",
             ]
+
+            self.logger.info("===================================")
+            self.logger.info("TASK DEFINITION KWARGS FOR REGISTER")
+            self.logger.info("===================================")
+            self.logger.info(self.task_definition_kwargs)
 
             boto3_c.register_task_definition(**self.task_definition_kwargs)
 
