@@ -241,7 +241,7 @@ def some_successful(
 
 def not_all_skipped(upstream_states: Set["state.State"]) -> bool:
     """
-    Runs if all upstream tasks were successful and were not all skipped.
+    Runs if all upstream tasks were not all skipped.
 
     Args:
         - upstream_states (set[State]): the set of all upstream states
@@ -249,12 +249,7 @@ def not_all_skipped(upstream_states: Set["state.State"]) -> bool:
 
     if all(state.is_skipped() for state in upstream_states):
         raise signals.SKIP("All upstreams were skipped", result=None)
-    elif not all(
-        state.is_successful() or state.is_skipped() for state in upstream_states
-    ):
-        raise signals.SKIP(
-            'Trigger was "not_all_skipped" but some of the upstream tasks failed.'
-        )
+
     return True
 
 

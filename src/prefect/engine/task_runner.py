@@ -242,6 +242,10 @@ class TaskRunner(Runner):
                     state, upstream_states=upstream_states
                 )
 
+                state = self.check_upstream_skipped(
+                    state, upstream_states=upstream_states
+                )
+
                 # if the task is mapped, process the mapped children and exit
                 if mapped:
                     state = self.run_mapped_task(
@@ -361,6 +365,46 @@ class TaskRunner(Runner):
                 )
             )
             raise ENDRUN(state)
+        return state
+
+    @call_state_handlers
+    def check_upstream_skipped(
+        self, state: State, upstream_states: Dict[Edge, State]
+    ) -> State:
+        """
+        Checks if any of the upstream tasks have skipped.
+        Args:
+            - state (State): the current state of this task
+            - upstream_states (Dict[Edge, State]): the upstream states
+        Returns:
+            - State: the state of the task after running the check
+        """
+        all_states = set()  # type: Set[State]
+        for edge, upstream_state in upstream_states.items():
+
+            # if the upstream state is Mapped, and this task is also mapped,
+            # we want each individual child to determine if it should
+            # skip or not based on its upstream parent in the mapping
+            if isinstance(upstream_state, Mapped) and not edge.mapped:
+                all_states.update(upstream_state.map_states)
+            else:
+                all_states.add(upstream_state)
+
+        if self.task.skip_on_upstream_skip and any(s.is_skipped() for s in all_states):
+            self.logger.debug(
+                "Task '{name}': Upstream states were skipped; ending run.".format(
+                    name=prefect.context.get("task_full_name", self.task.name)
+                )
+            )
+            raise ENDRUN(
+                state=Skipped(
+                    message=(
+                        "Upstream task was skipped; if this was not the intended "
+                        "behavior, consider changing `skip_on_upstream_skip=False` "
+                        "for this task."
+                    )
+                )
+            )
         return state
 
     @call_state_handlers
