@@ -327,10 +327,18 @@ class DockerAgent(Agent):
         self.logger.debug("Creating Docker container {}".format(storage.name))
 
         container_mount_paths = self.container_mount_paths
-        if not container_mount_paths:
-            host_config = None
-        else:
+        host_config = {}
+
+        if container_mount_paths:
             host_config = self.docker_client.create_host_config(binds=self.host_spec)
+
+        # Map internal host to host gateway
+        if "localhost" in config.cloud.api:
+            host_config.update(
+                self.docker_client.create_host_config(
+                    extra_hosts={"host.docker.internal": "host-gateway"}
+                )
+            )
 
         container = self.docker_client.create_container(
             storage.name,
