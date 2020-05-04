@@ -43,9 +43,15 @@ def call_state_handlers(method: Callable[..., State]) -> Callable[..., State]:
     def inner(self: "Runner", state: State, *args: Any, **kwargs: Any) -> State:
         raise_end_run = False
         raise_on_exception = prefect.context.get("raise_on_exception", False)
+        others = None
 
         try:
-            new_state = method(self, state, *args, **kwargs)
+            return_val = method(self, state, *args, **kwargs)
+            if isinstance(return_val, tuple):
+                new_state = return_val[0]
+                others = return_val[1:]
+            else:
+                new_state = return_val
         except ENDRUN as exc:
             raise_end_run = True
             new_state = exc.state
@@ -75,7 +81,10 @@ def call_state_handlers(method: Callable[..., State]) -> Callable[..., State]:
         if raise_end_run:
             raise ENDRUN(new_state)
 
-        return new_state
+        if others is not None:
+            return new_state, others  # type: ignore
+        else:
+            return new_state
 
     return inner
 
