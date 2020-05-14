@@ -107,7 +107,10 @@ export default {
               <v-icon color="grey darken-1" v-on="on">info</v-icon>
             </template>
             <span>
-              {{ errorMessage }}.
+              <div>This is the most recent error:</div>
+              <div class="my-4 font-italic font-weight-medium">
+                {{ errorMessage }}
+              </div>
               <div>
                 Did you set the
                 <span class="font-weight-bold">graphql_url</span> variable in
