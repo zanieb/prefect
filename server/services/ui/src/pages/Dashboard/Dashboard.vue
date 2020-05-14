@@ -1,4 +1,5 @@
 <script>
+import APIHealthTile from '@/pages/Dashboard/APIHealth-Tile'
 import ErrorsTile from '@/pages/Dashboard/Errors-Tile'
 import FlowRunHeartbeatTile from '@/pages/Dashboard/FlowRunHeartbeat-Tile'
 import SummaryTile from '@/pages/Dashboard/Summary-Tile'
@@ -10,6 +11,7 @@ import TileLayout from '@/layouts/TileLayout'
 
 export default {
   components: {
+    APIHealthTile,
     ErrorsTile,
     FailuresTile,
     FlowRunHeartbeatTile,
@@ -125,7 +127,9 @@ export default {
 
           <FlowRunHeartbeatTile slot="row-2-col-1-row-2-tile-1" />
 
-          <ErrorsTile slot="row-2-col-2-row-3-tile-1" full-height />
+          <ErrorsTile slot="row-2-col-2-row-2-tile-1" full-height />
+
+          <APIHealthTile slot="row-2-col-2-row-2-tile-2" full-height />
         </TileLayout>
       </v-tab-item>
 
