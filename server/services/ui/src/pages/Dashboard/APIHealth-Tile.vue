@@ -28,41 +28,46 @@ export default {
   computed: {
     cardColor() {
       if (this.connected) return 'success'
-      if (this.error) return 'Failed'
-      return 'grey'
+      if (this.connecting) return 'grey'
+      return 'Failed'
     },
     cardIcon() {
       if (this.connected) return 'signal_cellular_4_bar'
-      if (this.error) return 'signal_cellular_off'
-      return 'signal_cellular_connected_no_internet_4_bar'
+      if (this.connecting) return 'signal_cellular_connected_no_internet_4_bar'
+      return 'signal_cellular_off'
+    },
+    cardStatus() {
+      if (this.connected) return 'Connected'
+      if (this.connecting) return 'Connecting'
+      return 'No connection'
     },
     connecting() {
-      return !this.error && !this.connected
+      return this.error && this.retries <= this.maxRetries
     }
   },
-  mounted() {},
   apollo: {
     hello: {
       query: require('@/graphql/Dashboard/hello.gql'),
       loadingKey: 'loading',
       result(data) {
-        if (!data?.error && 'hello' in data.data && !data.loading) {
-          this.connected = true
-          this.error = false
-        } else {
-          this.connected = false
-          this.error = false
-          if (this.retries < this.maxRetries) {
+        if (data.loading) return
+
+        this.connected = !data?.error && 'hello' in data.data
+        this.error = data?.error
+
+        if (this.error) {
+          this.errorMessage = data.error
+          if (this.retries <= this.maxRetries) {
             this.retries++
           } else {
-            this.error = true
             this.skip = true
             setTimeout(() => {
               this.retries = 0
-              this.error = false
               this.skip = false
-            }, 3000)
+            }, 10000)
           }
+        } else {
+          this.errorMessage = null
         }
         return data.data.hello
       },
@@ -86,55 +91,74 @@ export default {
     }"
   >
     <v-system-bar :color="cardColor" :height="5" absolute> </v-system-bar>
-    <CardTitle
-      title="API Status"
-      :icon="cardIcon"
-      :icon-color="cardColor"
-      :loading="loading > 0"
-    >
+    <CardTitle :icon="cardIcon" :icon-color="cardColor" :loading="loading > 0">
+      <v-row slot="title" no-gutters class="d-flex align-center justify-start">
+        <div>
+          API Status
+        </div>
+        <a
+          v-if="!connected"
+          class="ml-3"
+          href="https://docs.prefect.io/core/concepts/configuration.html#environment-variables"
+          target="_blank"
+        >
+          <v-tooltip top>
+            <template v-slot:activator="{ on }">
+              <v-icon color="grey darken-1" v-on="on">info</v-icon>
+            </template>
+            <span>
+              {{ errorMessage }}.
+              <div>
+                Did you set the
+                <span class="font-weight-bold">graphql_url</span> variable in
+                <span class="font-weight-bold">~/.prefect/config.toml</span>
+                correctly before starting Prefect Server?
+              </div>
+              <div>
+                Click this icon to read more about configuring Prefect.
+              </div>
+            </span>
+          </v-tooltip>
+        </a>
+      </v-row>
     </CardTitle>
 
-    <v-list dense class="error-card-content">
-      <v-slide-y-transition leave-absolute group>
-        <v-list-item key="no-data" color="grey">
-          <v-list-item-avatar class="mr-0">
-            <v-progress-circular
-              v-if="connecting"
-              indeterminate
-              :size="15"
-              :width="2"
-              color="primary"
-            />
-            <v-icon v-else-if="error" class="Failed--text">
-              priority_high
-            </v-icon>
-            <v-icon v-else class="green--text">check</v-icon>
-          </v-list-item-avatar>
-          <v-list-item-content class="my-0 py-0">
-            <div
-              class="subtitle-1 font-weight-light"
-              style="line-height: 1.25rem;"
-            >
-              <span v-if="connected">
-                Connected
-              </span>
-              <span v-else-if="error">
-                Couldn't connect
-              </span>
-              <span v-else>
-                Connecting
-              </span>
+    <v-list dense>
+      <v-list-item color="grey">
+        <v-list-item-avatar class="mr-0">
+          <v-progress-circular
+            v-if="connecting"
+            indeterminate
+            :size="15"
+            :width="2"
+            color="primary"
+          />
+          <v-icon v-else-if="error" class="Failed--text">
+            priority_high
+          </v-icon>
+          <v-icon v-else class="green--text">check</v-icon>
+        </v-list-item-avatar>
+        <v-list-item-content class="my-0 py-0">
+          <div
+            class="subtitle-1 font-weight-light"
+            style="line-height: 1.25rem;"
+          >
+            <span v-if="connected">
+              Connected
+            </span>
+            <span v-else-if="connecting">
+              Attempting to connect
+            </span>
+            <span v-else>
+              Couldn't connect
+            </span>
 
-              to the API at
-              <span class="font-weight-medium">{{ graphqlUrl }}</span>
-            </div>
+            to
+          </div>
 
-            <div v-if="error" class="caption">
-              Retrying in a few seconds...
-            </div>
-          </v-list-item-content>
-        </v-list-item>
-      </v-slide-y-transition>
+          <div class="font-weight-medium">{{ graphqlUrl }}</div>
+        </v-list-item-content>
+      </v-list-item>
     </v-list>
   </v-card>
 </template>
