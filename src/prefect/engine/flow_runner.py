@@ -398,7 +398,7 @@ class FlowRunner(Runner):
         with executor.start():
 
             for task in self.flow.sorted_tasks():
-
+                prefect.context["task_tags"] = task.tags
                 task_state = task_states.get(task)
                 if task_state is None and isinstance(
                     task, prefect.tasks.core.constants.Constant
