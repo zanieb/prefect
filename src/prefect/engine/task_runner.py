@@ -669,7 +669,15 @@ class TaskRunner(Runner):
         target = self.task.target
 
         if result and target:
-            if result.exists(target, **prefect.context):
+            try:
+                result_exists = result.exists(target, **prefect.context)
+            except KeyError as exc:
+                raise KeyError(
+                    "The key %s does not exist. Under normal circumstances, this is because that key is not in Prefect Context. Please see the followings docs for a list of what is available in context and when: https://docs.prefect.io/api/latest/utilities/context.html#context".format(
+                        exc.args
+                    )
+                )
+            if result_exists:
                 new_res = result.read(target.format(**prefect.context))
                 cached_state = Cached(
                     result=new_res,

@@ -216,7 +216,15 @@ class Result(ResultInterface):
         new = self.copy()
         if isinstance(new.location, str):
             assert new.location is not None
-            new.location = new.location.format(**kwargs)
+            try:
+                new.location = new.location.format(**kwargs)
+            except KeyError as exc:
+                raise exceptions.ContextError(
+                    "The key %s does not exist. Under normal circumstances, this is because that key is not in Prefect Context. Please see the followings docs for a list of what is available in context and when: https://docs.prefect.io/api/latest/utilities/context.html#context".format(
+                        exc.args
+                    )
+                )
+
         elif new._formatter is not None:
             new.location = new._formatter(**kwargs)
         else:
