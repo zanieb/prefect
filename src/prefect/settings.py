@@ -246,6 +246,12 @@ PREFECT_HOME = Setting(
 directory may be created automatically when required.
 """
 
+PREFECT_EXTRA_ENTRYPOINTS = Setting(
+    str,
+    default="",
+    description="""Modules for Prefect to import on import of Prefect.""",
+)
+
 PREFECT_DEBUG_MODE = Setting(
     bool,
     default=False,
