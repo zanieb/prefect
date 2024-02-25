@@ -261,6 +261,9 @@ class Call(Generic[T]):
 
         self.runner = portal
 
+    async def arun(self) -> Optional[T]:
+        return self.run()
+
     def run(self) -> Optional[Awaitable[T]]:
         """
         Execute the call and place the result on the future.
@@ -272,7 +275,7 @@ class Call(Generic[T]):
             logger.debug("Skipping execution of cancelled call %r", self)
             return None
 
-        logger.debug(
+        logger.info(
             "Running call %r in thread %r%s",
             self,
             threading.current_thread().name,
@@ -371,14 +374,14 @@ class Call(Generic[T]):
             else:
                 raise
         except BaseException as exc:
-            logger.debug("Encountered exception in call %r", self, exc_info=True)
+            logger.info("Encountered exception in call %r", self, exc_info=True)
             self.future.set_exception(exc)
 
             # Prevent reference cycle in `exc`
             del self
         else:
             self.future.set_result(result)  # noqa: F821
-            logger.debug("Finished call %r", self)  # noqa: F821
+            logger.info("Finished call %r", self)  # noqa: F821
 
     async def _run_async(self, coro):
         from prefect._internal.concurrency.threads import in_global_loop
@@ -411,14 +414,14 @@ class Call(Generic[T]):
             else:
                 raise
         except BaseException as exc:
-            logger.debug("Encountered exception in async call %r", self, exc_info=True)
+            logger.info("Encountered exception in async call %r", self, exc_info=True)
 
             self.future.set_exception(exc)
             # Prevent reference cycle in `exc`
             del self
         else:
             self.future.set_result(result)  # noqa: F821
-            logger.debug("Finished async call %r", self)  # noqa: F821
+            logger.info("Finished async call %r", self)  # noqa: F821
 
     def __call__(self) -> T:
         """
@@ -442,13 +445,19 @@ class Call(Generic[T]):
     def __repr__(self) -> str:
         name = getattr(self.fn, "__name__", str(self.fn))
 
+        def fmt(val):
+            if isinstance(val, float):
+                return f"{val:.2f}"
+            else:
+                return repr(val)
+
         args, kwargs = self.args, self.kwargs
         if args is None or kwargs is None:
-            call_args = "<dropped>"
+            call_args = "..."
         else:
             call_args = ", ".join(
                 [repr(arg) for arg in args]
-                + [f"{key}={repr(val)}" for key, val in kwargs.items()]
+                + [f"{key}={fmt(val)}" for key, val in kwargs.items()]
             )
 
         # Enforce a maximum length

@@ -5,6 +5,7 @@ These contexts should never be directly mutated by the user.
 
 For more user-accessible information about the current run, see [`prefect.runtime`](../runtime/flow_run).
 """
+import asyncio
 import os
 import sys
 import warnings
@@ -256,6 +257,7 @@ class EngineContext(RunContext):
     # The synchronous portal is only created for async flows for creating engine calls
     # from synchronous task and subflow calls
     sync_portal: Optional[anyio.abc.BlockingPortal] = None
+    loop: Optional[asyncio.AbstractEventLoop] = None
     timeout_scope: Optional[anyio.abc.CancelScope] = None
 
     # Task group that can be used for background tasks during the flow run

@@ -115,6 +115,10 @@ from typing_extensions import Literal
 import prefect
 import prefect.context
 import prefect.plugins
+from prefect._internal.concurrency.event_loop import (
+    get_running_loop,
+    run_coroutine_in_loop_from_async,
+)
 from prefect._internal.compatibility.deprecated import deprecated_parameter
 from prefect._internal.compatibility.experimental import experimental_parameter
 from prefect._internal.concurrency.api import create_call, from_async, from_sync
@@ -841,7 +845,9 @@ async def orchestrate_flow_run(
                         "Beginning execution...", extra={"state_message": True}
                     )
 
-                flow_call = create_call(flow.fn, *args, **kwargs)
+                flow_call = create_call(
+                    wrap_flow_for_execution(flow_run_context, flow), *args, **kwargs
+                )
 
                 # This check for a parent call is needed for cases where the engine
                 # was entered directly during testing
@@ -855,13 +861,17 @@ async def orchestrate_flow_run(
                         # Unless the parent is async and the child is sync, run the
                         # child flow in the parent thread; running a sync child in
                         # an async parent could be bad for async performance.
-                        not (parent_flow_run_context.flow.isasync and not flow.isasync)
+                        not (parent_flow_run_context.flow.isasync != flow.isasync)
                     )
                 ):
+                    logger.debug(
+                        "Executing flow in existing thread %s", user_thread.name
+                    )
                     from_async.call_soon_in_waiting_thread(
                         flow_call, thread=user_thread, timeout=flow.timeout_seconds
                     )
                 else:
+                    logger.debug("Executing flow in new thread")
                     from_async.call_soon_in_new_thread(
                         flow_call, timeout=flow.timeout_seconds
                     )
@@ -966,6 +976,39 @@ async def orchestrate_flow_run(
             state = await propose_state(client, Running(), flow_run_id=flow_run.id)
 
     return state
+
+
+def wrap_flow_for_execution(flow_run_context: FlowRunContext, flow: Flow):
+    """
+    Wrap a user's flow function with engine state.
+
+    The wrapper will execute on the user's thread, allowing us to wait for futures
+    before the thread is shut down and capture information about the thread for
+    nested runs.
+    """
+    if flow_run_context.flow.isasync:
+
+        async def execute_flow_and_wait_for_tasks(*args, **kwargs):
+            # Set the loop for the flow run so we can schedule tasks on it
+            object.__setattr__(flow_run_context, "loop", get_running_loop())
+            retval = await flow.fn(*args, **kwargs)
+
+            # Wait for task all of the task run futures, we must do this on the user's thread
+            # to ensure that all tasks finish before the event loop is closed
+            await gather(
+                *(future._wait for future in flow_run_context.task_run_futures)
+            )
+            return retval
+
+    else:
+
+        def execute_flow_and_wait_for_tasks(*args, **kwargs):
+            retval = flow.fn(*args, **kwargs)
+            for future in flow_run_context.task_run_futures:
+                future.wait()
+            return retval
+
+    return execute_flow_and_wait_for_tasks
 
 
 @overload
@@ -2132,22 +2175,23 @@ async def orchestrate_task_run(
 
                 call = create_call(task.fn, *args, **kwargs)
 
-                if (
+                if flow_run_context and task.isasync and flow_run_context.flow.isasync:
+                    # Async tasks can always be executed on asynchronous flow;
+                    # schedule them to run directly on the flow's event loop
+                    await run_coroutine_in_loop_from_async(
+                        flow_run_context.loop, call.arun()
+                    )
+                elif (
                     flow_run_context
                     and user_thread
-                    and (
-                        # Async and sync tasks can be executed on synchronous flows
-                        # if the task runner is sequential; if the task is sync and a
-                        # concurrent task runner is used, we must execute it in a worker
-                        # thread instead.
-                        (
-                            concurrency_type == TaskConcurrencyType.SEQUENTIAL
-                            and not flow_run_context.flow.isasync
-                        )
-                        # Async tasks can always be executed on asynchronous flow; if the
-                        # flow is async we do not want to block the event loop with
-                        # synchronous tasks
-                        or (flow_run_context.flow.isasync and task.isasync)
+                    and
+                    # Async and sync tasks can be executed on synchronous flows
+                    # if the task runner is sequential; if the task is sync and a
+                    # concurrent task runner is used, we must execute it in a worker
+                    # thread instead.
+                    (
+                        concurrency_type == TaskConcurrencyType.SEQUENTIAL
+                        and not flow_run_context.flow.isasync
                     )
                 ):
                     from_async.call_soon_in_waiting_thread(
