@@ -91,7 +91,7 @@ jobs:
       - name: Install packages
         run: |
           python -m pip install -U uv
-          uv pip install -v --upgrade --system -e .[dev] 'pydantic>=2.4,<3'
+          uv pip install -v --upgrade --system .[dev] 'pydantic>=2.4,<3'
 
       - name: Start database container
         if: ${{ startsWith(matrix.database, 'postgres') }}
